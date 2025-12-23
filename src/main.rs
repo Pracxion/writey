@@ -43,9 +43,6 @@ async fn main() -> anyhow::Result<()> {
         | GatewayIntents::MESSAGE_CONTENT
         | GatewayIntents::GUILD_VOICE_STATES;
 
-    info!("Requested intents: {:?}", intents);
-    info!("Requested intents bits: {}", intents.bits());
-
     let mut client = Client::builder(token, intents)
         .event_handler(Handler).await?;
 

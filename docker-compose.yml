@@ -3,10 +3,41 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      target: prod
     container_name: writey
     restart: unless-stopped
     env_file:
       - .env
     volumes:
       - ./recordings:/app/recordings
+
+  dev-run:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: dev-run
+    container_name: writey-dev-run
+    volumes:
+      - .:/app
+      - cargo-cache:/usr/local/cargo/registry
+      - cargo-git:/usr/local/cargo/git
+    env_file:
+      - .env
+
+  dev-build:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: dev-build
+    container_name: writey-dev-build
+    volumes:
+      - .:/app
+      - cargo-cache:/usr/local/cargo/registry
+      - cargo-git:/usr/local/cargo/git
+    env_file:
+      - .env
+
+volumes:
+  cargo-cache:
+  cargo-git:
 

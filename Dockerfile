@@ -1,47 +1,42 @@
-# Use nightly Rust for edition 2024 support
-FROM rustlang/rust:nightly-slim as builder
-
-# Install build dependencies
+FROM rustlang/rust:nightly-slim AS builder
+WORKDIR /var/build
+COPY . ./writey
+WORKDIR /var/build/writey
 RUN apt-get update && apt-get install -y \
     cmake \
     pkg-config \
     libssl-dev \
     && rm -rf /var/lib/apt/lists/*
-
-# Set working directory
-WORKDIR /app
-
-# Copy manifest files
-COPY Cargo.toml Cargo.lock ./
-
-# Copy source code
-COPY src ./src
-
-# Build the application
 RUN cargo build --release
 
-# Runtime stage
-FROM debian:bookworm-slim
-
-# Install runtime dependencies
+FROM debian:bookworm-slim AS prod
+WORKDIR /app
 RUN apt-get update && apt-get install -y \
     ca-certificates \
     libssl3 \
     && rm -rf /var/lib/apt/lists/*
-
-# Create app user
 RUN useradd -m -u 1000 appuser
-
-WORKDIR /app
-
-# Copy the binary from builder
-COPY --from=builder /app/target/release/writey /app/writey
-
-# Create recordings directory
+COPY --from=builder /var/build/writey/target/release/writey ./writey
 RUN mkdir -p recordings && chown -R appuser:appuser recordings
-
 USER appuser
-
-# Run the application
 CMD ["./writey"]
 
+FROM rustlang/rust:nightly-slim AS dev-build
+WORKDIR /app
+RUN apt-get update && apt-get install -y \
+    cmake \
+    pkg-config \
+    libssl-dev \
+    && rm -rf /var/lib/apt/lists/*
+RUN cargo install cargo-watch
+CMD ["cargo", "watch", "-x", "build"]
+
+FROM rustlang/rust:nightly-slim AS dev-run
+WORKDIR /app
+RUN apt-get update && apt-get install -y \
+    cmake \
+    pkg-config \
+    libssl-dev \
+    && rm -rf /var/lib/apt/lists/*
+RUN cargo install cargo-watch
+CMD ["cargo", "watch", "-x", "run"]

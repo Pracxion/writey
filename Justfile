@@ -10,14 +10,6 @@ up:
 down:
     docker compose down
 
-# Build Docker images
-build:
-    docker compose build
-
-# Rebuild Docker images (no cache)
-build-no-cache:
-    docker compose build --no-cache
-
 # View logs
 logs:
     docker compose logs -f
@@ -45,4 +37,16 @@ exec cmd:
 # View container logs (tail)
 tail lines="100":
     docker compose logs --tail={{lines}} -f
+
+# Watch for Rust changes and rebuild/run in container
+# Usage: just watch [build|run] (default: build)
+watch mode="build":
+    @if [ "{{mode}}" = "build" ]; then \
+        docker compose up dev-build; \
+    elif [ "{{mode}}" = "run" ]; then \
+        docker compose up dev-run; \
+    else \
+        echo "Invalid mode. Use 'build' or 'run'"; \
+        exit 1; \
+    fi
 
