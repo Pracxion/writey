@@ -1,0 +1,12 @@
+services:
+  writey:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: writey
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - ./recordings:/app/recordings
+
