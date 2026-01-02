@@ -10,7 +10,7 @@ use serenity::{
     prelude::*,
     Client,
 };
-use songbird::SerenityInit;
+use songbird::{Config, SerenityInit, Songbird, driver::DecodeMode};
 use std::{
     collections::HashMap,
     sync::Arc,
@@ -206,9 +206,11 @@ async fn main() -> anyhow::Result<()> {
         .options(options)
         .build();
 
+    let songbird_config = Config::default().decode_mode(DecodeMode::Decode);
+    
     let mut client = Client::builder(token, intents)
         .framework(framework)
-        .register_songbird()
+        .register_songbird_from_config(songbird_config)
         .await?;
 
     client.start().await?;

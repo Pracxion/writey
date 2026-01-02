@@ -95,10 +95,7 @@ impl EventHandler for Receiver {
                 ..
             }) => {
                 let mut state = self.state.lock().await;
-                info!("Voice tick received");
-                // print the speaking map
-                info!("Speaking map: {:?}", speaking);
-                info!("State active: {}", state.active);
+
                 if !state.active {
                     return None;
                 }
@@ -114,18 +111,20 @@ impl EventHandler for Receiver {
                         }
                     };
 
-                    let mono_samples = if decoded.len() == SAMPLES_PER_FRAME * 2 {
-                        stereo_to_mono(decoded)
-                    } else if decoded.len() == SAMPLES_PER_FRAME {
-                        decoded.clone()
-                    } else {
-                        warn!(
-                            "Unexpected audio frame size: {} (expected {} or {})",
-                            decoded.len(),
-                            SAMPLES_PER_FRAME,
-                            SAMPLES_PER_FRAME * 2
-                        );
-                        decoded.clone()
+                    let stereo_sample_length = SAMPLES_PER_FRAME * 2;
+                    let mono_sample_length = SAMPLES_PER_FRAME;
+                    let mono_samples = match decoded.len() {
+                        stereo_sample_length => stereo_to_mono(decoded),
+                        mono_sample_length => decoded.clone(),
+                        _ => {
+                            warn!(
+                                "Unexpected audio frame size: {} (expected {} or {})",
+                                decoded.len(),
+                                stereo_sample_length,
+                                mono_sample_length
+                            );
+                            decoded.clone()
+                        }
                     };
 
                     let frame = AudioFrame {
@@ -133,6 +132,9 @@ impl EventHandler for Receiver {
                         samples: mono_samples,
                     };
 
+                    info!("Writing audio frame for user {}: {:?}", ssrc, frame);
+                    info!("SSRC map: {:?}", state.ssrc_map);
+                    info!("Storage: {:?}", state.storage);
                     if let Some(&user_id) = state.ssrc_map.get(ssrc) {
                         if let Some(ref mut storage) = state.storage {
                             if let Err(e) = storage.write_frame(user_id, &frame) {
@@ -140,7 +142,7 @@ impl EventHandler for Receiver {
                             }
                         }
                     } else {
-                        debug!("Received audio from unknown SSRC {}, skipping frame", ssrc);
+                        warn!("Received audio from unknown SSRC {}, skipping frame", ssrc);
                     }
                 }
             }

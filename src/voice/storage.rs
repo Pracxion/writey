@@ -18,7 +18,6 @@ const MAGIC: &[u8; 4] = b"WRTY";
 /// File format version
 const VERSION: u8 = 1;
 
-/// Audio frame with its tick index
 #[derive(Debug, Clone)]
 pub struct AudioFrame {
     /// Global tick index (each tick = 20ms)
@@ -79,7 +78,7 @@ impl FileHeader {
     }
 }
 
-/// Writer for sparse audio files (one per user)
+#[derive(Debug)]
 pub struct SparseAudioWriter {
     writer: BufWriter<File>,
     header: FileHeader,
@@ -216,7 +215,7 @@ impl Iterator for SparseAudioIterator {
     }
 }
 
-/// Manages sparse audio files for a recording session
+#[derive(Debug)]
 pub struct SessionStorage {
     /// Base directory for this session
     session_dir: PathBuf,
