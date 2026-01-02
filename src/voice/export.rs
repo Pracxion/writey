@@ -92,7 +92,8 @@ impl SessionExporter {
             info!("Processing user {} from {:?}", user_id, file_path);
 
             let mut reader = SparseAudioReader::open(file_path)?;
-            let header = reader.header();
+            let sample_rate = reader.header().sample_rate;
+            let channels = reader.header().channels;
             let frames = reader.read_all_frames()?;
 
             if frames.is_empty() {
@@ -116,12 +117,13 @@ impl SessionExporter {
 
             all_segments.extend(segments);
 
-            let samples_per_tick = (header.sample_rate as f32 * 0.020) as usize;
+            let samples_per_tick = (sample_rate as f32 * 0.020) as usize;
             let pcm = rebuild_pcm_from_frames(&frames, samples_per_tick);
 
             if self.config.per_user_wav {
                 let wav_path = output_dir.join(format!("user_{}.wav", user_id));
-                save_wav(&pcm, wav_path.to_str().unwrap(), header.sample_rate, header.channels)?;
+                save_wav(&pcm, wav_path.to_str().unwrap(), sample_rate, channels)
+                    .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("WAV write error: {}", e)))?;
                 result.user_wav_paths.insert(*user_id, wav_path);
             }
 
@@ -133,7 +135,8 @@ impl SessionExporter {
         if self.config.mixed_wav && !all_user_pcm.is_empty() {
             let mixed = self.mix_user_audio(&all_user_pcm);
             let mixed_path = output_dir.join("mixed.wav");
-            save_wav(&mixed, mixed_path.to_str().unwrap(), 48000, 1)?;
+            save_wav(&mixed, mixed_path.to_str().unwrap(), 48000, 1)
+                .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("WAV write error: {}", e)))?;
             result.mixed_wav_path = Some(mixed_path);
         }
 
@@ -150,7 +153,8 @@ impl SessionExporter {
                     segment.user_id, segment.id
                 ));
 
-                save_wav(&stt_audio, segment_path.to_str().unwrap(), 16000, 1)?;
+                save_wav(&stt_audio, segment_path.to_str().unwrap(), 16000, 1)
+                    .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("WAV write error: {}", e)))?;
                 result.stt_segment_paths.push(segment_path);
             }
         }

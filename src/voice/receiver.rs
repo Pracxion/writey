@@ -95,7 +95,10 @@ impl EventHandler for Receiver {
                 ..
             }) => {
                 let mut state = self.state.lock().await;
-                
+                info!("Voice tick received");
+                // print the speaking map
+                info!("Speaking map: {:?}", speaking);
+                info!("State active: {}", state.active);
                 if !state.active {
                     return None;
                 }
@@ -104,14 +107,6 @@ impl EventHandler for Receiver {
                 state.tick_index += 1;
 
                 for (ssrc, voice_data) in speaking {
-                    let user_id = match state.ssrc_map.get(ssrc) {
-                        Some(&id) => id,
-                        None => {
-                            debug!("Unknown SSRC {} in voice tick", ssrc);
-                            continue;
-                        }
-                    };
-
                     let decoded = match &voice_data.decoded_voice {
                         Some(d) if !d.is_empty() => d,
                         _ => {
@@ -138,10 +133,14 @@ impl EventHandler for Receiver {
                         samples: mono_samples,
                     };
 
-                    if let Some(ref mut storage) = state.storage {
-                        if let Err(e) = storage.write_frame(user_id, &frame) {
-                            warn!("Failed to write audio frame for user {}: {}", user_id, e);
+                    if let Some(&user_id) = state.ssrc_map.get(ssrc) {
+                        if let Some(ref mut storage) = state.storage {
+                            if let Err(e) = storage.write_frame(user_id, &frame) {
+                                warn!("Failed to write audio frame for user {}: {}", user_id, e);
+                            }
                         }
+                    } else {
+                        debug!("Received audio from unknown SSRC {}, skipping frame", ssrc);
                     }
                 }
             }

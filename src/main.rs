@@ -126,6 +126,7 @@ async fn main() -> anyhow::Result<()> {
         commands: vec![
             set_transcribe_name(),
             get_transcribe_name(),
+            list_voice_users(),
             start_recording(),
             stop_recording(),
         ],
@@ -164,7 +165,7 @@ async fn main() -> anyhow::Result<()> {
         skip_checks_for_owners: false,
         event_handler: |_ctx, event, _framework, _data| {
             Box::pin(async move {
-                println!("Got an event in event handler: {:?}", event);
+                println!("Got an event in event handler: {:?}", event.snake_case_name());
                 Ok(())
             })
         },
@@ -174,7 +175,8 @@ async fn main() -> anyhow::Result<()> {
     let token = std::env::var("DISCORD_TOKEN")
         .context("Set DISCORD_TOKEN environment variable")?;
 
-    let intents = GatewayIntents::GUILD_MESSAGES
+    let intents = GatewayIntents::GUILDS
+        | GatewayIntents::GUILD_MESSAGES
         | GatewayIntents::MESSAGE_CONTENT
         | GatewayIntents::GUILD_VOICE_STATES;
 
