@@ -15,6 +15,7 @@ use std::{
     collections::HashMap,
     sync::Arc,
     time::Duration,
+    path::PathBuf,
 };
 use tokio::sync::Mutex;
 use tracing::info;
@@ -23,29 +24,51 @@ use dotenvy::dotenv;
 mod command;
 mod db;
 mod voice;
+mod transcription;
 
 use command::command::*;
 use db::DbPool;
-use voice::receiver::{SsrcUserMap, UserAudioBuffer};
+use voice::{SharedRecordingState, SessionStorage};
 
 pub type Error = Box<dyn std::error::Error + Send + Sync>;
 pub type Context<'a> = poise::Context<'a, Data, Error>;
 
-/// Recording session data for a guild
 pub struct RecordingSession {
-    /// User ID who started the recording
-    pub started_by: String,
-    /// Maps SSRC to User ID
-    pub ssrc_map: SsrcUserMap,
-    /// Audio buffers per user
-    pub audio_buffers: UserAudioBuffer,
-    /// Whether recording is currently active
-    pub recording_active: Arc<Mutex<bool>>,
+    pub started_by: u64,
+    pub guild_id: u64,
+    pub session_id: String,
+    pub session_dir: PathBuf,
+    pub state: SharedRecordingState,
+    pub started_at: chrono::DateTime<chrono::Utc>,
+}
+
+impl RecordingSession {
+    pub fn new(guild_id: u64, started_by: u64) -> Self {
+        let timestamp = chrono::Utc::now();
+        let session_id = format!(
+            "{}_{}", 
+            guild_id,
+            timestamp.format("%Y%m%d_%H%M%S")
+        );
+        let session_dir = PathBuf::from("recordings").join(&session_id);
+
+        Self {
+            started_by,
+            guild_id,
+            session_id,
+            session_dir,
+            state: voice::create_recording_session(),
+            started_at: timestamp,
+        }
+    }
+
+    pub fn duration(&self) -> chrono::Duration {
+        chrono::Utc::now() - self.started_at
+    }
 }
 
 pub struct Data {
-    /// Active recording sessions per guild (guild_id -> RecordingSession)
-    pub active_sessions: Mutex<HashMap<String, RecordingSession>>,
+    pub active_sessions: Mutex<HashMap<u64, RecordingSession>>,
     pub db: DbPool,
 }
 
@@ -95,7 +118,10 @@ async fn main() -> anyhow::Result<()> {
         .context("Failed to initialize database")?;
     info!("Database initialized successfully");
 
-    // Every option can be omitted to use its default value
+    std::fs::create_dir_all("recordings").ok();
+    std::fs::create_dir_all("exports").ok();
+    std::fs::create_dir_all("models").ok();
+
     let options = poise::FrameworkOptions {
         commands: vec![
             set_transcribe_name(),
@@ -159,7 +185,6 @@ async fn main() -> anyhow::Result<()> {
                 println!("Logged in as {}", _ready.user.name);
                 poise::builtins::register_globally(ctx, &framework.options().commands).await?;
                 
-                // If GUILD_ID is set, also register commands for that guild for immediate availability
                 if let Ok(guild_id_str) = std::env::var("GUILD_ID") {
                     if let Ok(guild_id) = guild_id_str.parse::<u64>() {
                         let guild_id = serenity::model::id::GuildId::new(guild_id);

@@ -1,11 +1,13 @@
-use crate::voice::receiver::{mix_audio_buffers, save_to_wav, Receiver, CHANNELS, SAMPLE_RATE};
+use crate::voice::{
+    Receiver, SessionStorage, SessionExporter, ExportConfig,
+    SAMPLE_RATE, CHANNELS,
+};
 use crate::{Context, Error, RecordingSession};
 use crate::db;
+use crate::transcription::{Transcript, TranscriptSegment, ExportFormat};
 use poise::serenity_prelude as serenity;
 use songbird::CoreEvent;
-use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::Mutex;
 use tracing::{error, info};
 
 #[poise::command(prefix_command, slash_command, rename = "set-transcribe-name")]
@@ -50,24 +52,22 @@ pub async fn get_transcribe_name(ctx: Context<'_>) -> Result<(), Error> {
 #[poise::command(prefix_command, slash_command, rename = "start-recording", guild_only)]
 pub async fn start_recording(ctx: Context<'_>) -> Result<(), Error> {
     let guild_id = ctx.guild_id().ok_or("This command must be used in a guild")?;
-    let guild_id_str = guild_id.to_string();
+    let guild_id_u64 = guild_id.get();
     let user_id = ctx.author().id;
-    let user_id_str = user_id.to_string();
+    let user_id_u64 = user_id.get();
 
-    // Check if there's already an active recording session
     {
         let sessions = ctx.data().active_sessions.lock().await;
-        if sessions.contains_key(&guild_id_str) {
-            ctx.say("A recording is already active on this server.").await?;
+        if sessions.contains_key(&guild_id_u64) {
+            ctx.say("A recording is already active on this guild.").await?;
             return Ok(());
         }
     }
 
-    // Get the user's current voice channel
     let voice_channel_id = {
         let guild = ctx
             .guild()
-            .ok_or("Could not find guild")?;
+            .ok_or("Could not find guild id")?;
         
         guild
             .voice_states
@@ -83,13 +83,11 @@ pub async fn start_recording(ctx: Context<'_>) -> Result<(), Error> {
         }
     };
 
-    // Get the Songbird manager
     let manager = songbird::get(ctx.serenity_context())
         .await
         .ok_or("Songbird voice client not initialized")?
         .clone();
 
-    // Join the voice channel
     let handler_lock = match manager.join(guild_id, voice_channel_id).await {
         Ok(handler) => handler,
         Err(e) => {
@@ -101,79 +99,81 @@ pub async fn start_recording(ctx: Context<'_>) -> Result<(), Error> {
 
     info!("Joined voice channel {} in guild {}", voice_channel_id, guild_id);
 
-    // Create the recording session data
-    let ssrc_map = Arc::new(Mutex::new(HashMap::new()));
-    let audio_buffers = Arc::new(Mutex::new(HashMap::new()));
-    let recording_active = Arc::new(Mutex::new(true));
+    let session = RecordingSession::new(guild_id_u64, user_id_u64);
+    
+    let storage = match SessionStorage::new(
+        session.session_dir.clone(),
+        SAMPLE_RATE,
+        CHANNELS,
+    ) {
+        Ok(s) => s,
+        Err(e) => {
+            error!("Failed to create session storage: {:?}", e);
+            let _ = manager.remove(guild_id).await;
+            ctx.say(format!("Failed to create storage: {:?}", e)).await?;
+            return Ok(());
+        }
+    };
 
-    // Create the receiver and register events
-    let receiver = Receiver::new(
-        Arc::clone(&ssrc_map),
-        Arc::clone(&audio_buffers),
-        Arc::clone(&recording_active),
-    );
+    {
+        let mut state = session.state.lock().await;
+        state.start(storage);
+    }
+
+    let receiver = Receiver::new(Arc::clone(&session.state));
 
     {
         let mut handler = handler_lock.lock().await;
         
-        // Subscribe to speaking state updates to map SSRC -> User ID
         handler.add_global_event(CoreEvent::SpeakingStateUpdate.into(), receiver);
         
-        // Create a new receiver for VoiceTick events
-        let voice_tick_receiver = Receiver::new(
-            Arc::clone(&ssrc_map),
-            Arc::clone(&audio_buffers),
-            Arc::clone(&recording_active),
-        );
+        let voice_tick_receiver = Receiver::new(Arc::clone(&session.state));
         
-        // Subscribe to voice tick events for recording
         handler.add_global_event(CoreEvent::VoiceTick.into(), voice_tick_receiver);
     }
 
-    // Store the recording session
+    let session_id = session.session_id.clone();
+
     {
         let mut sessions = ctx.data().active_sessions.lock().await;
-        sessions.insert(
-            guild_id_str.clone(),
-            RecordingSession {
-                started_by: user_id_str,
-                ssrc_map,
-                audio_buffers,
-                recording_active,
-            },
-        );
+        sessions.insert(guild_id_u64, session);
     }
 
-    ctx.say("🎙️ Started recording! You can stop the recording with `/stop-recording`.").await?;
+    ctx.say(format!(
+        "🎙️ **Recording started!**\n\
+        📁 Session: `{}`\n\
+        ⏱️ Use `/stop-recording` to stop and save.",
+        session_id
+    )).await?;
+    
     Ok(())
 }
 
 #[poise::command(prefix_command, slash_command, rename = "stop-recording", guild_only)]
 pub async fn stop_recording(ctx: Context<'_>) -> Result<(), Error> {
     let guild_id = ctx.guild_id().ok_or("This command must be used in a guild")?;
-    let guild_id_str = guild_id.to_string();
+    let guild_id_u64 = guild_id.get();
 
-    // Get and remove the recording session
     let session = {
         let mut sessions = ctx.data().active_sessions.lock().await;
-        sessions.remove(&guild_id_str)
+        sessions.remove(&guild_id_u64)
     };
 
     let session = match session {
         Some(s) => s,
         None => {
-            ctx.say("No recording is active on this server.").await?;
+            ctx.say("No recording is active on this guild.").await?;
             return Ok(());
         }
     };
 
-    // Signal to stop recording
-    {
-        let mut recording_active = session.recording_active.lock().await;
-        *recording_active = false;
-    }
+    ctx.defer().await?;
 
-    // Get the Songbird manager and leave the voice channel
+    let storage = {
+        let mut state = session.state.lock().await;
+        state.stop()
+    };
+
     let manager = songbird::get(ctx.serenity_context())
         .await
         .ok_or("Songbird voice client not initialized")?
@@ -185,49 +185,100 @@ pub async fn stop_recording(ctx: Context<'_>) -> Result<(), Error> {
 
     info!("Left voice channel in guild {}", guild_id);
 
-    // Get the audio buffers and mix them
-    let audio_buffers = session.audio_buffers.lock().await;
+    let user_files = match storage {
+        Some(s) => {
+            match s.finalize() {
+                Ok(files) => files,
+                Err(e) => {
+                    error!("Failed to finalize storage: {:?}", e);
+                    ctx.say(format!("Recording stopped but failed to save: {:?}", e)).await?;
+                    return Ok(());
+                }
+            }
+        }
+        None => {
+            ctx.say("Recording stopped, but no storage was active.").await?;
+            return Ok(());
+        }
+    };
+
+    if user_files.is_empty() {
+        ctx.say("Recording stopped, but no audio was captured.").await?;
+        return Ok(());
+    }
+
+    let duration = session.duration();
+    let duration_str = format_duration(duration);
+
+    // Export the session
+    let export_config = ExportConfig {
+        output_dir: std::path::PathBuf::from("exports"),
+        per_user_wav: true,
+        mixed_wav: true,
+        prepare_for_stt: true,
+        transcript_formats: vec![ExportFormat::JsonPretty, ExportFormat::Vtt, ExportFormat::Srt],
+    };
+
+    let exporter = SessionExporter::new(export_config);
     
-    if audio_buffers.is_empty() {
-        ctx.say("⚠️ Recording stopped, but no audio was captured.").await?;
-        return Ok(());
-    }
+    match exporter.export_session(&session.session_dir, &session.session_id) {
+        Ok(result) => {
+            let mut response = format!(
+                "🎙️ **Recording stopped and saved!**\n\
+                📁 Session: `{}`\n\
+                ⏱️ Duration: {}\n\
+                👥 Users recorded: {}\n",
+                session.session_id,
+                duration_str,
+                result.user_count,
+            );
 
-    // Mix all user audio into a single buffer
-    let mixed_audio = mix_audio_buffers(&audio_buffers);
+            if let Some(ref path) = result.mixed_wav_path {
+                response.push_str(&format!("🔊 Mixed audio: `{}`\n", path.display()));
+            }
 
-    if mixed_audio.is_empty() {
-        ctx.say("⚠️ Recording stopped, but no audio data was captured.").await?;
-        return Ok(());
-    }
+            if !result.stt_segment_paths.is_empty() {
+                response.push_str(&format!(
+                    "📝 STT segments: {} files ready for transcription\n",
+                    result.stt_segment_paths.len()
+                ));
+            }
 
-    // Generate filename with timestamp
-    let timestamp = chrono::Utc::now().format("%Y%m%d_%H%M%S");
-    let filename = format!("recordings/recording_{}_{}.wav", guild_id_str, timestamp);
-
-    // Ensure recordings directory exists
-    if let Err(e) = std::fs::create_dir_all("recordings") {
-        error!("Failed to create recordings directory: {:?}", e);
-        ctx.say(format!("Failed to create recordings directory: {:?}", e)).await?;
-        return Ok(());
-    }
-
-    // Save to WAV file
-    match save_to_wav(&mixed_audio, &filename, SAMPLE_RATE, CHANNELS) {
-        Ok(_) => {
-            let duration_secs = mixed_audio.len() as f64 / (SAMPLE_RATE as f64 * CHANNELS as f64);
-            ctx.say(format!(
-                "🎙️ Recording stopped and saved!\n📁 File: `{}`\n⏱️ Duration: {:.1} seconds\n👥 Users recorded: {}",
-                filename,
-                duration_secs,
-                audio_buffers.len()
-            )).await?;
+            ctx.say(response).await?;
         }
         Err(e) => {
-            error!("Failed to save WAV file: {:?}", e);
-            ctx.say(format!("Failed to save recording: {:?}", e)).await?;
+            error!("Failed to export session: {:?}", e);
+            
+            // Still report success with basic info
+            ctx.say(format!(
+                "🎙️ **Recording stopped!**\n\
+                📁 Session: `{}`\n\
+                ⏱️ Duration: {}\n\
+                👥 Users: {}\n\
+                ⚠️ Export warning: {:?}",
+                session.session_id,
+                duration_str,
+                user_files.len(),
+                e
+            )).await?;
         }
     }
 
     Ok(())
+}
+
+/// Format a duration nicely
+fn format_duration(duration: chrono::Duration) -> String {
+    let total_secs = duration.num_seconds();
+    let hours = total_secs / 3600;
+    let minutes = (total_secs % 3600) / 60;
+    let seconds = total_secs % 60;
+
+    if hours > 0 {
+        format!("{}h {}m {}s", hours, minutes, seconds)
+    } else if minutes > 0 {
+        format!("{}m {}s", minutes, seconds)
+    } else {
+        format!("{}s", seconds)
+    }
 }
