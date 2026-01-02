@@ -10,25 +10,42 @@ use serenity::{
     prelude::*,
     Client,
 };
+use songbird::SerenityInit;
 use std::{
     collections::HashMap,
     sync::Arc,
     time::Duration,
 };
-use std::sync::Mutex;
+use tokio::sync::Mutex;
 use tracing::info;
 use dotenvy::dotenv;
 
 mod command;
 mod db;
+mod voice;
 
 use command::command::*;
 use db::DbPool;
+use voice::receiver::{SsrcUserMap, UserAudioBuffer};
 
 pub type Error = Box<dyn std::error::Error + Send + Sync>;
 pub type Context<'a> = poise::Context<'a, Data, Error>;
 
+/// Recording session data for a guild
+pub struct RecordingSession {
+    /// User ID who started the recording
+    pub started_by: String,
+    /// Maps SSRC to User ID
+    pub ssrc_map: SsrcUserMap,
+    /// Audio buffers per user
+    pub audio_buffers: UserAudioBuffer,
+    /// Whether recording is currently active
+    pub recording_active: Arc<Mutex<bool>>,
+}
+
 pub struct Data {
+    /// Active recording sessions per guild (guild_id -> RecordingSession)
+    pub active_sessions: Mutex<HashMap<String, RecordingSession>>,
     pub db: DbPool,
 }
 
@@ -80,7 +97,12 @@ async fn main() -> anyhow::Result<()> {
 
     // Every option can be omitted to use its default value
     let options = poise::FrameworkOptions {
-        commands: vec![set_transcribe_name(), get_transcribe_name()],
+        commands: vec![
+            set_transcribe_name(),
+            get_transcribe_name(),
+            start_recording(),
+            stop_recording(),
+        ],
         prefix_options: poise::PrefixFrameworkOptions {
             prefix: Some("/".into()),
             edit_tracker: Some(Arc::new(poise::EditTracker::for_timespan(
@@ -149,6 +171,7 @@ async fn main() -> anyhow::Result<()> {
                 }
                 
                 Ok(Data {
+                    active_sessions: Mutex::new(HashMap::new()),
                     db,
                 })
             })
@@ -158,6 +181,7 @@ async fn main() -> anyhow::Result<()> {
 
     let mut client = Client::builder(token, intents)
         .framework(framework)
+        .register_songbird()
         .await?;
 
     client.start().await?;
