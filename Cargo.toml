@@ -24,3 +24,5 @@ dashmap = "6"
 byteorder = "1.5"
 hound = "3.5"
 dotenvy = "0.15"
+
+sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite", "migrate"] }

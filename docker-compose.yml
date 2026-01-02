@@ -10,6 +10,7 @@ services:
       - .env
     volumes:
       - ./recordings:/app/recordings
+      - ./settings:/app/settings
 
   dev-run:
     build:

@@ -20,15 +20,16 @@ use tracing::info;
 use dotenvy::dotenv;
 
 mod command;
-use command::command::*;
+mod db;
 
-// Types used by all command functions
+use command::command::*;
+use db::DbPool;
+
 pub type Error = Box<dyn std::error::Error + Send + Sync>;
 pub type Context<'a> = poise::Context<'a, Data, Error>;
 
-// Custom user data passed to all command functions
 pub struct Data {
-    pub votes: Mutex<HashMap<String, u64>>,
+    pub db: DbPool,
 }
 
 async fn on_error(error: poise::FrameworkError<'_, Data, Error>) {
@@ -71,9 +72,16 @@ async fn main() -> anyhow::Result<()> {
     dotenv().ok();
     tracing_subscriber::fmt::init();
 
+    // Initialize database connection
+    let database_url = std::env::var("DATABASE_URL").unwrap();
+    let db_pool = db::init_db(&database_url)
+        .await
+        .context("Failed to initialize database")?;
+    info!("Database initialized successfully");
+
     // Every option can be omitted to use its default value
     let options = poise::FrameworkOptions {
-        commands: vec![set_descriptor_name()],
+        commands: vec![set_transcribe_name()],
         prefix_options: poise::PrefixFrameworkOptions {
             prefix: Some("/".into()),
             edit_tracker: Some(Arc::new(poise::EditTracker::for_timespan(
@@ -125,11 +133,12 @@ async fn main() -> anyhow::Result<()> {
 
     let framework = poise::Framework::builder()
         .setup(move |ctx, _ready, framework| {
+            let db = db_pool.clone();
             Box::pin(async move {
                 println!("Logged in as {}", _ready.user.name);
                 poise::builtins::register_globally(ctx, &framework.options().commands).await?;
                 Ok(Data {
-                    votes: Mutex::new(HashMap::new()),
+                    db,
                 })
             })
         })

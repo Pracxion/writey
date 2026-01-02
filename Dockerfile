@@ -6,6 +6,7 @@ RUN apt-get update && apt-get install -y \
     cmake \
     pkg-config \
     libssl-dev \
+    libsqlite3-dev \
     && rm -rf /var/lib/apt/lists/*
 RUN cargo build --release
 
@@ -14,10 +15,12 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y \
     ca-certificates \
     libssl3 \
+    libsqlite3-0 \
     && rm -rf /var/lib/apt/lists/*
 RUN useradd -m -u 1000 appuser
 COPY --from=builder /var/build/writey/target/release/writey ./writey
-RUN mkdir -p recordings && chown -R appuser:appuser recordings
+COPY --from=builder /var/build/writey/migrations ./migrations
+RUN mkdir -p recordings settings && chown -R appuser:appuser recordings settings
 USER appuser
 CMD ["./writey"]
 
@@ -27,6 +30,7 @@ RUN apt-get update && apt-get install -y \
     cmake \
     pkg-config \
     libssl-dev \
+    libsqlite3-dev \
     && rm -rf /var/lib/apt/lists/*
 RUN cargo install cargo-watch
 CMD ["cargo", "watch", "-x", "build"]
@@ -37,6 +41,7 @@ RUN apt-get update && apt-get install -y \
     cmake \
     pkg-config \
     libssl-dev \
+    libsqlite3-dev \
     && rm -rf /var/lib/apt/lists/*
 RUN cargo install cargo-watch
 CMD ["cargo", "watch", "-x", "run"]
