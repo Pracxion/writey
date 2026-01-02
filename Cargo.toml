@@ -18,6 +18,7 @@ songbird = { version = "0.5", features = ["serenity", "gateway", "driver", "rece
 anyhow = "1.0"
 tracing = "0.1"
 tracing-subscriber = "0.3"
+poise = "0.6"
 
 dashmap = "6"
 byteorder = "1.5"
