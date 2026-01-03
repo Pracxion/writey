@@ -1,3 +1,4 @@
+use poise::futures_util::TryFutureExt;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs::File;
@@ -5,8 +6,7 @@ use std::io::{self, BufWriter};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
-use tracing::{info, warn, error};
-use poise::futures_util::TryFutureExt;
+use tracing::{error, info, warn};
 
 const TICK_FLUSH_INTERVAL: Duration = Duration::from_secs(30);
 const SSRC_MAP_FLUSH_INTERVAL: Duration = Duration::from_secs(30);
@@ -78,35 +78,32 @@ impl StorageWriter {
 
         loop {
             match tokio::time::timeout(Duration::from_secs(5), self.rx.recv()).await {
-                Ok(Some(msg)) => {
-                    match msg {
-                        StorageMessage::Frame { ssrc, frame } => {
-                            self.buffers.entry(ssrc).or_default().push(frame);
-                        }
-                        StorageMessage::SsrcMap(map) => {
-                            self.ssrc_map = map;
-                        }
-                        StorageMessage::Flush => {
-                            if let Err(e) = self.flush_all() {
-                                error!("Failed to flush: {}", e);
-                            }
-                        }
-                        StorageMessage::Shutdown => {
-                            info!("Storage writer shutting down");
-                            if let Err(e) = self.flush_all() {
-                                error!("Failed to flush on shutdown: {}", e);
-                            }
-                            break;
+                Ok(Some(msg)) => match msg {
+                    StorageMessage::Frame { ssrc, frame } => {
+                        self.buffers.entry(ssrc).or_default().push(frame);
+                    }
+                    StorageMessage::SsrcMap(map) => {
+                        self.ssrc_map = map;
+                    }
+                    StorageMessage::Flush => {
+                        if let Err(e) = self.flush_all() {
+                            error!("Failed to flush: {}", e);
                         }
                     }
-                }
+                    StorageMessage::Shutdown => {
+                        info!("Storage writer shutting down");
+                        if let Err(e) = self.flush_all() {
+                            error!("Failed to flush on shutdown: {}", e);
+                        }
+                        break;
+                    }
+                },
                 Ok(None) => {
                     info!("Storage channel closed, flushing and exiting");
                     let _ = self.flush_all();
                     break;
                 }
-                Err(_) => {
-                }
+                Err(_) => {}
             }
 
             if let Err(e) = self.try_flush() {
@@ -139,26 +136,26 @@ impl StorageWriter {
             self.last_tick_flush = Instant::now();
             return Ok(());
         }
-    
+
         info!("Flushing {} buffered frames to disk", total_frames);
-    
+
         let frames_to_flush: Vec<(u64, Vec<AudioFrame>)> = self.buffers.drain().collect();
         let session_dir = self.session_dir.clone();
-    
+
         let session_dir_clone = session_dir.clone();
         tokio::task::spawn_blocking(move || {
             for (ssrc, frames) in frames_to_flush {
                 let path = session_dir_clone.join(format!("{}.json", ssrc));
-    
+
                 let mut all_frames: Vec<AudioFrame> = if path.exists() {
                     let file = File::open(&path)?;
                     serde_json::from_reader(file).unwrap_or_default()
                 } else {
                     Vec::new()
                 };
-    
+
                 all_frames.extend(frames);
-    
+
                 let file = File::create(&path)?;
                 let writer = BufWriter::new(file);
                 serde_json::to_writer(writer, &all_frames)?;
@@ -166,7 +163,7 @@ impl StorageWriter {
             Ok::<(), io::Error>(())
         })
         .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("Task join error: {}", e)));
-    
+
         self.last_tick_flush = Instant::now();
         Ok(())
     }
@@ -176,12 +173,12 @@ impl StorageWriter {
             self.last_ssrc_map_flush = Instant::now();
             return Ok(());
         }
-    
+
         info!("Flushing ssrc_map with {} entries", self.ssrc_map.len());
-        
+
         let ssrc_map = self.ssrc_map.clone();
         let path = self.session_dir.join("ssrc_map.json");
-        
+
         tokio::task::spawn_blocking(move || {
             let file = File::create(&path)?;
             let writer = BufWriter::new(file);
@@ -189,7 +186,7 @@ impl StorageWriter {
             Ok::<(), io::Error>(())
         })
         .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("Task join error: {}", e)));
-    
+
         self.last_ssrc_map_flush = Instant::now();
         Ok(())
     }

@@ -1,14 +1,9 @@
 use super::audio::stereo_to_mono;
 use super::storage::{AudioFrame, StorageHandle};
 use songbird::{
-    events::context_data::VoiceTick,
-    model::payload::Speaking,
-    Event, EventContext, EventHandler,
+    Event, EventContext, EventHandler, events::context_data::VoiceTick, model::payload::Speaking,
 };
-use std::{
-    collections::HashMap,
-    sync::Arc,
-};
+use std::{collections::HashMap, sync::Arc};
 use tokio::sync::Mutex;
 use tracing::info;
 
@@ -82,7 +77,7 @@ impl EventHandler for Receiver {
                 if let Some(user_id) = user_id {
                     let mut state = self.state.lock().await;
                     state.ssrc_map.insert(*ssrc, user_id.0);
-                    
+
                     if let Some(ref storage) = state.storage {
                         storage.update_ssrc_map(state.ssrc_map.clone());
                     }
@@ -111,11 +106,13 @@ impl EventHandler for Receiver {
                     };
 
                     if let Some(ref storage) = state.storage {
-                        storage.buffer_frame(*ssrc as u64, 
+                        storage.buffer_frame(
+                            *ssrc as u64,
                             AudioFrame {
                                 tick_index: current_tick,
                                 samples: stereo_to_mono(decoded),
-                            });
+                            },
+                        );
                     }
                 }
             }

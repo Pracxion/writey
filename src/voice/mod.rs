@@ -2,5 +2,5 @@ pub mod audio;
 pub mod receiver;
 pub mod storage;
 
-pub use receiver::{create_recording_session, Receiver, SharedRecordingState};
+pub use receiver::{Receiver, SharedRecordingState, create_recording_session};
 pub use storage::StorageWriter;

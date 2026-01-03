@@ -122,10 +122,7 @@ pub fn resample(samples: &[i16], source_rate: u32, target_rate: u32) -> Vec<i16>
 }
 
 /// Process audio for transcription: convert to mono 16kHz 16-bit
-pub fn prepare_for_transcription(
-    samples: &[i16],
-    source_format: AudioFormat,
-) -> Vec<i16> {
+pub fn prepare_for_transcription(samples: &[i16], source_format: AudioFormat) -> Vec<i16> {
     let mut processed = samples.to_vec();
 
     // Convert to mono if stereo
@@ -252,10 +249,7 @@ pub fn mix_tracks(tracks: &[&[i16]]) -> Vec<i16> {
 }
 
 /// Rebuild continuous PCM from sparse frames
-pub fn rebuild_pcm_from_frames(
-    frames: &[AudioFrame],
-    samples_per_tick: usize,
-) -> Vec<i16> {
+pub fn rebuild_pcm_from_frames(frames: &[AudioFrame], samples_per_tick: usize) -> Vec<i16> {
     if frames.is_empty() {
         return Vec::new();
     }
@@ -298,8 +292,13 @@ pub fn save_wav(
     }
     writer.finalize()?;
 
-    info!("Saved WAV: {} ({} samples, {}Hz, {}ch)", 
-        path, samples.len(), sample_rate, channels);
+    info!(
+        "Saved WAV: {} ({} samples, {}Hz, {}ch)",
+        path,
+        samples.len(),
+        sample_rate,
+        channels
+    );
     Ok(())
 }
 
@@ -331,4 +330,3 @@ mod tests {
         assert!((calculate_rms(&signal) - 100.0).abs() < 0.1);
     }
 }
-

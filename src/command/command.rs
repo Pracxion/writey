@@ -1,6 +1,6 @@
+use crate::db;
 use crate::voice::{Receiver, StorageWriter};
 use crate::{Context, Error, RecordingSession};
-use crate::db;
 use poise::serenity_prelude as serenity;
 use songbird::CoreEvent;
 use std::sync::Arc;
@@ -16,7 +16,8 @@ pub async fn set_transcribe_name(
 
     db::set_transcribe_name(&ctx.data().db, user_id, guild_id, &new_name).await?;
 
-    ctx.say(format!("Set Transcribtion Name to {new_name}!")).await?;
+    ctx.say(format!("Set Transcribtion Name to {new_name}!"))
+        .await?;
     Ok(())
 }
 
@@ -48,9 +49,12 @@ pub async fn get_transcribe_name(ctx: Context<'_>) -> Result<(), Error> {
 #[poise::command(prefix_command, slash_command, rename = "list-voice-users", guild_only)]
 pub async fn list_voice_users(
     ctx: Context<'_>,
-    #[description = "Voice channel to list users from (leave empty for your current channel)"] channel: Option<serenity::model::channel::Channel>,
+    #[description = "Voice channel to list users from (leave empty for your current channel)"]
+    channel: Option<serenity::model::channel::Channel>,
 ) -> Result<(), Error> {
-    let guild_id = ctx.guild_id().ok_or("This command must be used in a guild")?;
+    let guild_id = ctx
+        .guild_id()
+        .ok_or("This command must be used in a guild")?;
     let user_id = ctx.author().id;
 
     let voice_channel_id = if let Some(ch) = channel {
@@ -59,7 +63,8 @@ pub async fn list_voice_users(
                 if ch.kind == serenity::model::channel::ChannelType::Voice {
                     ch.id
                 } else {
-                    ctx.say("The specified channel is not a voice channel!").await?;
+                    ctx.say("The specified channel is not a voice channel!")
+                        .await?;
                     return Ok(());
                 }
             }
@@ -70,9 +75,13 @@ pub async fn list_voice_users(
         }
     } else {
         let cache = &ctx.serenity_context().cache;
-        
-        let channel_id = cache.guild(guild_id)
-            .and_then(|guild| guild.voice_states.get(&user_id).and_then(|vs| vs.channel_id));
+
+        let channel_id = cache.guild(guild_id).and_then(|guild| {
+            guild
+                .voice_states
+                .get(&user_id)
+                .and_then(|vs| vs.channel_id)
+        });
 
         match channel_id {
             Some(id) => id,
@@ -85,10 +94,11 @@ pub async fn list_voice_users(
 
     let cache = &ctx.serenity_context().cache;
     let http = ctx.serenity_context().http.clone();
-    
+
     let user_ids_in_channel: Vec<u64> = {
         let guild = cache.guild(guild_id).ok_or("Guild not found in cache")?;
-        guild.voice_states
+        guild
+            .voice_states
             .iter()
             .filter(|(_, vs)| vs.channel_id == Some(voice_channel_id))
             .map(|(uid, _)| uid.get())
@@ -98,33 +108,46 @@ pub async fn list_voice_users(
     let mut users_in_channel = Vec::new();
     for user_id in user_ids_in_channel {
         let user_id_serenity = serenity::model::id::UserId::new(user_id);
-        
+
         if let Some(user) = cache.user(user_id_serenity) {
-            let display_name = user.global_name
+            let display_name = user
+                .global_name
                 .as_deref()
                 .unwrap_or_else(|| user.name.as_str());
-            
+
             users_in_channel.push((user_id, display_name.to_string(), user.name.clone()));
         } else {
             if let Ok(user) = http.get_user(user_id_serenity).await {
-                let display_name = user.global_name
+                let display_name = user
+                    .global_name
                     .as_deref()
                     .unwrap_or_else(|| user.name.as_str());
                 users_in_channel.push((user_id, display_name.to_string(), user.name.clone()));
             } else {
-                users_in_channel.push((user_id, format!("User {}", user_id), format!("User {}", user_id)));
+                users_in_channel.push((
+                    user_id,
+                    format!("User {}", user_id),
+                    format!("User {}", user_id),
+                ));
             }
         }
     }
 
     if users_in_channel.is_empty() {
-        ctx.say(format!("No users found in voice channel <#{}>.", voice_channel_id)).await?;
+        ctx.say(format!(
+            "No users found in voice channel <#{}>.",
+            voice_channel_id
+        ))
+        .await?;
         return Ok(());
     }
 
     let mut response = format!("**Users in <#{}>:**\n", voice_channel_id);
     for (user_id, display_name, username) in users_in_channel {
-        response.push_str(&format!("- **{}** (`{}`) - ID: `{}`\n", display_name, username, user_id));
+        response.push_str(&format!(
+            "- **{}** (`{}`) - ID: `{}`\n",
+            display_name, username, user_id
+        ));
     }
 
     ctx.say(response).await?;
@@ -134,9 +157,13 @@ pub async fn list_voice_users(
 #[poise::command(prefix_command, slash_command, rename = "start-recording", guild_only)]
 pub async fn start_recording(
     ctx: Context<'_>,
-    #[description = "Voice channel to record (leave empty to auto-detect)"] channel: Option<serenity::model::channel::Channel>,
+    #[description = "Voice channel to record (leave empty to auto-detect)"] channel: Option<
+        serenity::model::channel::Channel,
+    >,
 ) -> Result<(), Error> {
-    let guild_id = ctx.guild_id().ok_or("This command must be used in a guild")?;
+    let guild_id = ctx
+        .guild_id()
+        .ok_or("This command must be used in a guild")?;
     let guild_id_u64 = guild_id.get();
     let user_id = ctx.author().id;
     let user_id_u64 = user_id.get();
@@ -144,7 +171,8 @@ pub async fn start_recording(
     {
         let sessions = ctx.data().active_sessions.lock().await;
         if sessions.contains_key(&guild_id_u64) {
-            ctx.say("A recording is already active on this guild.").await?;
+            ctx.say("A recording is already active on this guild.")
+                .await?;
             return Ok(());
         }
     }
@@ -155,7 +183,8 @@ pub async fn start_recording(
                 if ch.kind == serenity::model::channel::ChannelType::Voice {
                     ch.id
                 } else {
-                    ctx.say("The specified channel is not a voice channel!").await?;
+                    ctx.say("The specified channel is not a voice channel!")
+                        .await?;
                     return Ok(());
                 }
             }
@@ -166,10 +195,14 @@ pub async fn start_recording(
         }
     } else {
         let cache = &ctx.serenity_context().cache;
-        
-        let channel_id = cache.guild(guild_id)
-            .and_then(|guild| guild.voice_states.get(&user_id).and_then(|vs| vs.channel_id));
-        
+
+        let channel_id = cache.guild(guild_id).and_then(|guild| {
+            guild
+                .voice_states
+                .get(&user_id)
+                .and_then(|vs| vs.channel_id)
+        });
+
         match channel_id {
             Some(id) => id,
             None => {
@@ -188,21 +221,26 @@ pub async fn start_recording(
         Ok(handler) => handler,
         Err(e) => {
             error!("Failed to join voice channel: {:?}", e);
-            ctx.say(format!("Failed to join voice channel: {:?}", e)).await?;
+            ctx.say(format!("Failed to join voice channel: {:?}", e))
+                .await?;
             return Ok(());
         }
     };
 
-    info!("Joined voice channel {} in guild {}", voice_channel_id, guild_id);
+    info!(
+        "Joined voice channel {} in guild {}",
+        voice_channel_id, guild_id
+    );
 
     let mut session = RecordingSession::new(guild_id_u64, user_id_u64);
-    
+
     let (storage_handle, storage_writer) = match StorageWriter::new(session.session_dir.clone()) {
         Ok(s) => s,
         Err(e) => {
             error!("Failed to create session storage: {:?}", e);
             let _ = manager.remove(guild_id).await;
-            ctx.say(format!("Failed to create storage: {:?}", e)).await?;
+            ctx.say(format!("Failed to create storage: {:?}", e))
+                .await?;
             return Ok(());
         }
     };
@@ -221,11 +259,11 @@ pub async fn start_recording(
 
     {
         let mut handler = handler_lock.lock().await;
-        
+
         handler.add_global_event(CoreEvent::SpeakingStateUpdate.into(), receiver);
-        
+
         let voice_tick_receiver = Receiver::new(Arc::clone(&session.state));
-        
+
         handler.add_global_event(CoreEvent::VoiceTick.into(), voice_tick_receiver);
     }
 
@@ -240,14 +278,17 @@ pub async fn start_recording(
         "🎙️ **Recording started!**\n\
         📁 Session: `{}`",
         session_id
-    )).await?;
-    
+    ))
+    .await?;
+
     Ok(())
 }
 
 #[poise::command(prefix_command, slash_command, rename = "stop-recording", guild_only)]
 pub async fn stop_recording(ctx: Context<'_>) -> Result<(), Error> {
-    let guild_id = ctx.guild_id().ok_or("This command must be used in a guild")?;
+    let guild_id = ctx
+        .guild_id()
+        .ok_or("This command must be used in a guild")?;
     let guild_id_u64 = guild_id.get();
 
     let session = {
@@ -298,9 +339,9 @@ pub async fn stop_recording(ctx: Context<'_>) -> Result<(), Error> {
         "🎙️ **Recording stopped!**\n\
         📁 Session: `{}`\n\
         ⏱️ Duration: {}",
-        session.session_id,
-        duration_str
-    )).await?;
+        session.session_id, duration_str
+    ))
+    .await?;
     Ok(())
 }
 

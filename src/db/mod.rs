@@ -1,4 +1,4 @@
-use sqlx::{sqlite::SqlitePoolOptions, SqlitePool};
+use sqlx::{SqlitePool, sqlite::SqlitePoolOptions};
 use std::path::Path;
 
 pub type DbPool = SqlitePool;
@@ -35,7 +35,7 @@ pub async fn get_user_setting(
     guild_id: &str,
 ) -> Result<Option<UserSetting>, sqlx::Error> {
     let setting = sqlx::query_as::<_, UserSetting>(
-        "SELECT * FROM user_settings WHERE user_id = ? AND guild_id = ?"
+        "SELECT * FROM user_settings WHERE user_id = ? AND guild_id = ?",
     )
     .bind(user_id)
     .bind(guild_id)
@@ -57,7 +57,7 @@ pub async fn set_transcribe_name(
         VALUES (?, ?, ?, datetime('now'))
         ON CONFLICT(user_id, guild_id) 
         DO UPDATE SET transcribe_name = excluded.transcribe_name, updated_at = datetime('now')
-        "#
+        "#,
     )
     .bind(user_id)
     .bind(guild_id)
@@ -67,4 +67,3 @@ pub async fn set_transcribe_name(
 
     Ok(())
 }
-
