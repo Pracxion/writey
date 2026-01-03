@@ -99,11 +99,27 @@ impl EventHandler for Receiver {
 
                 for (ssrc, voice_data) in speaking {
                     let decoded = match &voice_data.decoded_voice {
-                        Some(d) if !d.is_empty() => d,
-                        _ => {
-                            continue;
-                        }
+                        Some(d) => d,
+                        None => continue,
                     };
+
+                    if decoded.is_empty() {
+                        continue;
+                    }
+
+                    let samples = stereo_to_mono(decoded);
+
+                    let mut is_every_sample_zero = true;
+                    for sample in samples {
+                        if sample != 0 {
+                            is_every_sample_zero = false;
+                            break;
+                        }
+                    }
+                    
+                    if is_every_sample_zero {
+                        continue;
+                    }
 
                     if let Some(ref storage) = state.storage {
                         storage.buffer_frame(

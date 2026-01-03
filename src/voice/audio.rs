@@ -1,13 +1,6 @@
 use super::storage::AudioFrame;
 use tracing::info;
 
-#[derive(Debug, Clone, Copy)]
-pub struct AudioFormat {
-    pub sample_rate: u32,
-    pub channels: u16,
-}
-
-/// Convert stereo PCM to mono by averaging channels
 pub fn stereo_to_mono(stereo: &[i16]) -> Vec<i16> {
     stereo
         .chunks(2)

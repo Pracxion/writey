@@ -7,6 +7,49 @@ use songbird::CoreEvent;
 use std::sync::Arc;
 use tracing::{error, info};
 
+async fn get_voice_channel(
+    ctx: Context<'_>,
+    guild_id: serenity::model::id::GuildId,
+    user_id: serenity::model::id::UserId,
+    channel: Option<serenity::model::channel::Channel>,
+) -> Result<Option<serenity::model::id::ChannelId>, Error> {
+    match channel {
+        Some(ch) => {
+            match ch {
+                serenity::model::channel::Channel::Guild(ch) => {
+                    if ch.kind == serenity::model::channel::ChannelType::Voice {
+                        Ok(Some(ch.id))
+                    } else {
+                        ctx.say("The specified channel is not a voice channel!")
+                            .await?;
+                        Ok(None)
+                    }
+                }
+                _ => {
+                    ctx.say("Invalid channel type!").await?;
+                    Ok(None)
+                }
+            }
+        }
+        None => {
+            let cache = &ctx.serenity_context().cache;
+            let channel_id = cache.guild(guild_id).and_then(|guild| {
+                guild
+                    .voice_states
+                    .get(&user_id)
+                    .and_then(|vs| vs.channel_id)
+            });
+            match channel_id {
+                Some(id) => Ok(Some(id)),
+                None => {
+                    ctx.say("You're not in a voice channel. Please join one or specify a channel: `/start-recording channel:#your-voice-channel`").await?;
+                    Ok(None)
+                }
+            }
+        }
+    }
+}
+
 #[poise::command(prefix_command, slash_command, rename = "start-recording", guild_only)]
 pub async fn start_recording(
     ctx: Context<'_>,
@@ -30,39 +73,9 @@ pub async fn start_recording(
         }
     }
 
-    let voice_channel_id = if let Some(ch) = channel {
-        match ch {
-            serenity::model::channel::Channel::Guild(ch) => {
-                if ch.kind == serenity::model::channel::ChannelType::Voice {
-                    ch.id
-                } else {
-                    ctx.say("The specified channel is not a voice channel!")
-                        .await?;
-                    return Ok(());
-                }
-            }
-            _ => {
-                ctx.say("Invalid channel type!").await?;
-                return Ok(());
-            }
-        }
-    } else {
-        let cache = &ctx.serenity_context().cache;
-
-        let channel_id = cache.guild(guild_id).and_then(|guild| {
-            guild
-                .voice_states
-                .get(&user_id)
-                .and_then(|vs| vs.channel_id)
-        });
-
-        match channel_id {
-            Some(id) => id,
-            None => {
-                ctx.say("You're not in a voice channel. Please join one or specify a channel: `/start-recording channel:#your-voice-channel`").await?;
-                return Ok(());
-            }
-        }
+    let voice_channel_id = match get_voice_channel(ctx, guild_id, user_id, channel).await? {
+        Some(id) => id,
+        None => return Ok(()),
     };
 
     let manager = songbird::get(ctx.serenity_context())
