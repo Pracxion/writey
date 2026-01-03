@@ -1,5 +1,5 @@
-use super::audio::{stereo_to_mono, AudioFormat};
-use super::storage::{AudioFrame, SessionStorage};
+use super::audio::stereo_to_mono;
+use super::storage::{AudioFrame, StorageHandle};
 use songbird::{
     events::context_data::VoiceTick,
     model::payload::Speaking,
@@ -10,7 +10,7 @@ use std::{
     sync::Arc,
 };
 use tokio::sync::Mutex;
-use tracing::{info, warn, debug};
+use tracing::{info, warn};
 
 /// Sample rate for audio (48kHz is Discord's native rate)
 pub const SAMPLE_RATE: u32 = 48000;
@@ -21,13 +21,11 @@ pub const FRAME_DURATION_MS: f32 = 20.0;
 /// Samples per 20ms frame at 48kHz mono
 pub const SAMPLES_PER_FRAME: usize = (SAMPLE_RATE as f32 * FRAME_DURATION_MS / 1000.0) as usize;
 
-pub type SsrcUserMap = Arc<Mutex<HashMap<u32, u64>>>;
-
 pub struct RecordingState {
     pub active: bool,
     pub tick_index: u64,
     pub ssrc_map: HashMap<u32, u64>,
-    pub storage: Option<SessionStorage>,
+    pub storage: Option<StorageHandle>,
 }
 
 impl RecordingState {
@@ -40,17 +38,15 @@ impl RecordingState {
         }
     }
 
-    pub fn start(&mut self, storage: SessionStorage) {
+    pub fn start(&mut self, storage: StorageHandle) {
         self.active = true;
         self.tick_index = 0;
         self.ssrc_map.clear();
         self.storage = Some(storage);
-        info!("Recording started");
     }
 
-    pub fn stop(&mut self) -> Option<SessionStorage> {
+    pub fn stop(&mut self) -> Option<StorageHandle> {
         self.active = false;
-        info!("Recording stopped at tick {}", self.tick_index);
         self.storage.take()
     }
 }
@@ -87,6 +83,10 @@ impl EventHandler for Receiver {
                     let mut state = self.state.lock().await;
                     state.ssrc_map.insert(*ssrc, user_id.0);
                     info!("Mapped SSRC {} to User ID {}", ssrc, user_id.0);
+                    
+                    if let Some(ref storage) = state.storage {
+                        storage.update_ssrc_map(state.ssrc_map.clone());
+                    }
                 }
             }
             EventContext::VoiceTick(VoiceTick {
@@ -131,18 +131,9 @@ impl EventHandler for Receiver {
                         tick_index: current_tick,
                         samples: mono_samples,
                     };
-
-                    info!("Writing audio frame for user {}: {:?}", ssrc, frame);
-                    info!("SSRC map: {:?}", state.ssrc_map);
-                    info!("Storage: {:?}", state.storage);
-                    if let Some(&user_id) = state.ssrc_map.get(ssrc) {
-                        if let Some(ref mut storage) = state.storage {
-                            if let Err(e) = storage.write_frame(user_id, &frame) {
-                                warn!("Failed to write audio frame for user {}: {}", user_id, e);
-                            }
-                        }
-                    } else {
-                        warn!("Received audio from unknown SSRC {}, skipping frame", ssrc);
+                    
+                    if let Some(ref storage) = state.storage {
+                        storage.buffer_frame(*ssrc as u64, frame);
                     }
                 }
             }

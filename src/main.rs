@@ -18,6 +18,7 @@ use std::{
     path::PathBuf,
 };
 use tokio::sync::Mutex;
+use tokio::task::JoinHandle;
 use tracing::info;
 use dotenvy::dotenv;
 
@@ -28,7 +29,7 @@ mod transcription;
 
 use command::command::*;
 use db::DbPool;
-use voice::{SharedRecordingState, SessionStorage};
+use voice::{SharedRecordingState};
 
 pub type Error = Box<dyn std::error::Error + Send + Sync>;
 pub type Context<'a> = poise::Context<'a, Data, Error>;
@@ -40,6 +41,7 @@ pub struct RecordingSession {
     pub session_dir: PathBuf,
     pub state: SharedRecordingState,
     pub started_at: chrono::DateTime<chrono::Utc>,
+    pub storage_task: Option<JoinHandle<()>>,
 }
 
 impl RecordingSession {
@@ -59,6 +61,7 @@ impl RecordingSession {
             session_dir,
             state: voice::create_recording_session(),
             started_at: timestamp,
+            storage_task: None,
         }
     }
 

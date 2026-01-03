@@ -1,13 +1,10 @@
-use crate::voice::{
-    Receiver, SessionStorage, SessionExporter, ExportConfig,
-    SAMPLE_RATE, CHANNELS,
-};
+use crate::voice::{Receiver, StorageWriter};
 use crate::{Context, Error, RecordingSession};
 use crate::db;
-use crate::transcription::{Transcript, TranscriptSegment, ExportFormat};
 use poise::serenity_prelude as serenity;
 use songbird::CoreEvent;
 use std::sync::Arc;
+use tokio::task::JoinHandle;
 use tracing::{error, info};
 
 #[poise::command(prefix_command, slash_command, rename = "set-transcribe-name")]
@@ -199,13 +196,9 @@ pub async fn start_recording(
 
     info!("Joined voice channel {} in guild {}", voice_channel_id, guild_id);
 
-    let session = RecordingSession::new(guild_id_u64, user_id_u64);
+    let mut session = RecordingSession::new(guild_id_u64, user_id_u64);
     
-    let storage = match SessionStorage::new(
-        session.session_dir.clone(),
-        SAMPLE_RATE,
-        CHANNELS,
-    ) {
+    let (storage_handle, storage_writer) = match StorageWriter::new(session.session_dir.clone()) {
         Ok(s) => s,
         Err(e) => {
             error!("Failed to create session storage: {:?}", e);
@@ -215,9 +208,14 @@ pub async fn start_recording(
         }
     };
 
+    let storage_task = tokio::spawn(async move {
+        storage_writer.run().await;
+    });
+    session.storage_task = Some(storage_task);
+
     {
         let mut state = session.state.lock().await;
-        state.start(storage);
+        state.start(storage_handle);
     }
 
     let receiver = Receiver::new(Arc::clone(&session.state));
@@ -254,12 +252,12 @@ pub async fn stop_recording(ctx: Context<'_>) -> Result<(), Error> {
     let guild_id = ctx.guild_id().ok_or("This command must be used in a guild")?;
     let guild_id_u64 = guild_id.get();
 
-    let session = {
+    let mut session = {
         let mut sessions = ctx.data().active_sessions.lock().await;
         sessions.remove(&guild_id_u64)
     };
 
-    let session = match session {
+    let mut session = match session {
         Some(s) => s,
         None => {
             ctx.say("No recording is active on this guild.").await?;
@@ -269,10 +267,23 @@ pub async fn stop_recording(ctx: Context<'_>) -> Result<(), Error> {
 
     ctx.defer().await?;
 
-    let storage = {
+    // Stop recording and get storage handle
+    let storage_handle = {
         let mut state = session.state.lock().await;
         state.stop()
     };
+
+    // Signal storage writer to shutdown
+    if let Some(handle) = storage_handle {
+        handle.shutdown();
+    }
+
+    // Wait for storage task to complete
+    if let Some(task) = session.storage_task.take() {
+        if let Err(e) = task.await {
+            error!("Storage task panicked: {:?}", e);
+        }
+    }
 
     let manager = songbird::get(ctx.serenity_context())
         .await
@@ -285,89 +296,19 @@ pub async fn stop_recording(ctx: Context<'_>) -> Result<(), Error> {
 
     info!("Left voice channel in guild {}", guild_id);
 
-    let user_files = match storage {
-        Some(s) => {
-            match s.finalize() {
-                Ok(files) => files,
-                Err(e) => {
-                    error!("Failed to finalize storage: {:?}", e);
-                    ctx.say(format!("Recording stopped but failed to save: {:?}", e)).await?;
-                    return Ok(());
-                }
-            }
-        }
-        None => {
-            ctx.say("Recording stopped, but no storage was active.").await?;
-            return Ok(());
-        }
-    };
-
-    if user_files.is_empty() {
-        ctx.say("Recording stopped, but no audio was captured.").await?;
-        return Ok(());
-    }
-
     let duration = session.duration();
     let duration_str = format_duration(duration);
 
-    // Export the session
-    let export_config = ExportConfig {
-        output_dir: std::path::PathBuf::from("exports"),
-        per_user_wav: true,
-        mixed_wav: true,
-        prepare_for_stt: true,
-        transcript_formats: vec![ExportFormat::JsonPretty, ExportFormat::Vtt, ExportFormat::Srt],
-    };
-
-    let exporter = SessionExporter::new(export_config);
-    
-    match exporter.export_session(&session.session_dir, &session.session_id) {
-        Ok(result) => {
-            let mut response = format!(
-                "🎙️ **Recording stopped and saved!**\n\
-                📁 Session: `{}`\n\
-                ⏱️ Duration: {}\n\
-                👥 Users recorded: {}\n",
-                session.session_id,
-                duration_str,
-                result.user_count,
-            );
-
-            if let Some(ref path) = result.mixed_wav_path {
-                response.push_str(&format!("🔊 Mixed audio: `{}`\n", path.display()));
-            }
-
-            if !result.stt_segment_paths.is_empty() {
-                response.push_str(&format!(
-                    "📝 STT segments: {} files ready for transcription\n",
-                    result.stt_segment_paths.len()
-                ));
-            }
-
-            ctx.say(response).await?;
-        }
-        Err(e) => {
-            error!("Failed to export session: {:?}", e);
-            
-            // Still report success with basic info
-            ctx.say(format!(
-                "🎙️ **Recording stopped!**\n\
-                📁 Session: `{}`\n\
-                ⏱️ Duration: {}\n\
-                👥 Users: {}\n\
-                ⚠️ Export warning: {:?}",
-                session.session_id,
-                duration_str,
-                user_files.len(),
-                e
-            )).await?;
-        }
-    }
-
+    ctx.say(format!(
+        "🎙️ **Recording stopped!**\n\
+        📁 Session: `{}`\n\
+        ⏱️ Duration: {}",
+        session.session_id,
+        duration_str
+    )).await?;
     Ok(())
 }
 
-/// Format a duration nicely
 fn format_duration(duration: chrono::Duration) -> String {
     let total_secs = duration.num_seconds();
     let hours = total_secs / 3600;
