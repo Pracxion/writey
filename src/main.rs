@@ -55,8 +55,10 @@ impl RecordingSession {
     }
 }
 
+type ActiveSessions = HashMap<u64, RecordingSession>;
+
 pub struct Data {
-    pub active_sessions: Mutex<HashMap<u64, RecordingSession>>,
+    pub active_sessions: Mutex<ActiveSessions>,
     pub db: DbPool,
 }
 
@@ -84,15 +86,6 @@ impl EventHandler for Handler {
         info!("Connected to {} guilds", ready.guilds.len());
         info!("Gateway version: {:?}", ready.version);
     }
-
-    async fn message(&self, _ctx: serenity::Context, msg: Message) {
-        if msg.author.bot {
-            return;
-        }
-
-        let content = msg.content.trim();
-        info!("Message: {}", content);
-    }
 }
 
 #[tokio::main]
@@ -107,8 +100,6 @@ async fn main() -> anyhow::Result<()> {
     info!("Database initialized successfully");
 
     std::fs::create_dir_all("recordings").ok();
-    std::fs::create_dir_all("exports").ok();
-    std::fs::create_dir_all("models").ok();
 
     let options = poise::FrameworkOptions {
         commands: vec![

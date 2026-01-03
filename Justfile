@@ -50,15 +50,12 @@ watch mode="build":
         exit 1; \
     fi
 
-# Format Rust code
 format:
     cargo fmt
 
-# Run clippy linter
 clippy:
     cargo clippy
 
-# Check code (compile without building)
 check:
     cargo check
 
