@@ -18,20 +18,14 @@ pub struct AudioFrame {
     pub samples: Vec<i16>,
 }
 
-/// Messages sent to the storage writer task
 #[derive(Debug)]
 pub enum StorageMessage {
-    /// Buffer an audio frame for an SSRC
     Frame { ssrc: u64, frame: AudioFrame },
-    /// Update the SSRC -> user_id mapping
     SsrcMap(HashMap<u32, u64>),
-    /// Request immediate flush
     Flush,
-    /// Shutdown the writer task
     Shutdown,
 }
 
-/// Handle to send messages to the storage writer (used by receiver)
 #[derive(Debug, Clone)]
 pub struct StorageHandle {
     tx: mpsc::UnboundedSender<StorageMessage>,
@@ -149,11 +143,9 @@ impl StorageWriter {
     
         info!("Flushing {} buffered frames to disk", total_frames);
     
-        // Collect all data to flush
         let frames_to_flush: Vec<(u64, Vec<AudioFrame>)> = self.buffers.drain().collect();
         let session_dir = self.session_dir.clone();
     
-        // Spawn blocking task for file I/O
         let session_dir_clone = session_dir.clone();
         tokio::task::spawn_blocking(move || {
             for (ssrc, frames) in frames_to_flush {
