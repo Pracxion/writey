@@ -1,11 +1,6 @@
-//! Audio processing utilities.
-//!
-//! Provides downsampling, mono conversion, and audio manipulation.
-
 use super::storage::AudioFrame;
 use tracing::info;
 
-/// Audio format configuration
 #[derive(Debug, Clone, Copy)]
 pub struct AudioFormat {
     pub sample_rate: u32,
@@ -28,7 +23,6 @@ impl AudioFormat {
         channels: 1,
     };
 
-    /// Samples per 20ms frame
     pub fn samples_per_frame(&self) -> usize {
         (self.sample_rate as f32 * self.channels as f32 * 0.020) as usize
     }
