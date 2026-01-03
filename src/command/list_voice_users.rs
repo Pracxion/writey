@@ -109,4 +109,3 @@ pub async fn list_voice_users(
     ctx.say(response).await?;
     Ok(())
 }
-

@@ -1,6 +1,6 @@
-use crate::db;
 use crate::Context;
 use crate::Error;
+use crate::db;
 
 #[poise::command(prefix_command, slash_command, rename = "get-transcribe-name")]
 pub async fn get_transcribe_name(ctx: Context<'_>) -> Result<(), Error> {
@@ -26,4 +26,3 @@ pub async fn get_transcribe_name(ctx: Context<'_>) -> Result<(), Error> {
 
     Ok(())
 }
-

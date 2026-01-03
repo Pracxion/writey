@@ -1,6 +1,6 @@
-use crate::db;
 use crate::Context;
 use crate::Error;
+use crate::db;
 
 #[poise::command(prefix_command, slash_command, rename = "set-transcribe-name")]
 pub async fn set_transcribe_name(
@@ -16,4 +16,3 @@ pub async fn set_transcribe_name(
         .await?;
     Ok(())
 }
-

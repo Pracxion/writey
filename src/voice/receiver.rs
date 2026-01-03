@@ -116,14 +116,14 @@ impl EventHandler for Receiver {
                             break;
                         }
                     }
-                    
+
                     if is_every_sample_zero {
                         continue;
                     }
 
                     if let Some(ref storage) = state.storage {
                         storage.buffer_frame(
-                            *ssrc as u64,
+                            *ssrc,
                             AudioFrame {
                                 tick_index: current_tick,
                                 samples: stereo_to_mono(decoded),

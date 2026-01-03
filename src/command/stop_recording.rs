@@ -72,9 +72,9 @@ pub async fn stop_recording(ctx: Context<'_>) -> Result<(), Error> {
         "🎙️ **Recording stopped!**\n\
         📁 Session: `{}`\n\
         ⏱️ Duration: {}",
-        session.session_id, duration_str
+        session.session_dir.display(),
+        duration_str
     ))
     .await?;
     Ok(())
 }
-

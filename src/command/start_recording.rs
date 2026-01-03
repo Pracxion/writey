@@ -1,7 +1,7 @@
-use crate::voice::{Receiver, StorageWriter};
 use crate::Context;
 use crate::Error;
 use crate::RecordingSession;
+use crate::voice::{Receiver, StorageWriter};
 use poise::serenity_prelude as serenity;
 use songbird::CoreEvent;
 use std::sync::Arc;
@@ -14,23 +14,21 @@ async fn get_voice_channel(
     channel: Option<serenity::model::channel::Channel>,
 ) -> Result<Option<serenity::model::id::ChannelId>, Error> {
     match channel {
-        Some(ch) => {
-            match ch {
-                serenity::model::channel::Channel::Guild(ch) => {
-                    if ch.kind == serenity::model::channel::ChannelType::Voice {
-                        Ok(Some(ch.id))
-                    } else {
-                        ctx.say("The specified channel is not a voice channel!")
-                            .await?;
-                        Ok(None)
-                    }
-                }
-                _ => {
-                    ctx.say("Invalid channel type!").await?;
+        Some(ch) => match ch {
+            serenity::model::channel::Channel::Guild(ch) => {
+                if ch.kind == serenity::model::channel::ChannelType::Voice {
+                    Ok(Some(ch.id))
+                } else {
+                    ctx.say("The specified channel is not a voice channel!")
+                        .await?;
                     Ok(None)
                 }
             }
-        }
+            _ => {
+                ctx.say("Invalid channel type!").await?;
+                Ok(None)
+            }
+        },
         None => {
             let cache = &ctx.serenity_context().cache;
             let channel_id = cache.guild(guild_id).and_then(|guild| {
@@ -98,7 +96,7 @@ pub async fn start_recording(
         voice_channel_id, guild_id
     );
 
-    let mut session = RecordingSession::new(guild_id_u64, user_id_u64);
+    let mut session = RecordingSession::new(guild_id_u64);
 
     let (storage_handle, storage_writer) = match StorageWriter::new(session.session_dir.clone()) {
         Ok(s) => s,
@@ -133,8 +131,6 @@ pub async fn start_recording(
         handler.add_global_event(CoreEvent::VoiceTick.into(), voice_tick_receiver);
     }
 
-    let session_id = session.session_id.clone();
-
     {
         let mut sessions = ctx.data().active_sessions.lock().await;
         sessions.insert(guild_id_u64, session);
@@ -143,10 +139,9 @@ pub async fn start_recording(
     ctx.say(format!(
         "🎙️ **Recording started!**\n\
         📁 Session: `{}`",
-        session_id
+        session.session_dir.display()
     ))
     .await?;
 
     Ok(())
 }
-

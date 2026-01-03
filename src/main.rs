@@ -24,9 +24,7 @@ pub type Error = Box<dyn std::error::Error + Send + Sync>;
 pub type Context<'a> = poise::Context<'a, Data, Error>;
 
 pub struct RecordingSession {
-    pub started_by: u64,
     pub guild_id: u64,
-    pub session_id: String,
     pub session_dir: PathBuf,
     pub state: SharedRecordingState,
     pub started_at: chrono::DateTime<chrono::Utc>,
@@ -34,15 +32,15 @@ pub struct RecordingSession {
 }
 
 impl RecordingSession {
-    pub fn new(guild_id: u64, started_by: u64) -> Self {
+    pub fn new(guild_id: u64) -> Self {
         let timestamp = chrono::Utc::now();
-        let session_id = format!("{}_{}", guild_id, timestamp.format("%Y%m%d_%H%M%S"));
-        let session_dir = PathBuf::from("recordings").join(&session_id);
+        let timestamp_str = timestamp.format("%Y%m%d_%H%M%S").to_string();
+        let session_dir = PathBuf::from("recordings")
+            .join(guild_id.to_string())
+            .join(&timestamp_str);
 
         Self {
-            started_by,
             guild_id,
-            session_id,
             session_dir,
             state: voice::create_recording_session(),
             started_at: timestamp,
