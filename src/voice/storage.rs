@@ -173,7 +173,6 @@ impl StorageWriter {
 
         info!("Flushing {} buffered frames to disk", total_frames);
 
-        // Collect ssrcs and their chunks first
         let ssrcs: Vec<u32> = self.buffers.keys().cloned().collect();
         let mut ssrc_chunk_map: HashMap<u32, u32> = HashMap::new();
         for ssrc in &ssrcs {
@@ -210,7 +209,6 @@ impl StorageWriter {
                 let mut writer = BufWriter::new(file);
 
                 for frame in frames {
-                    // Format: tick_index sample1,sample2,sample3,...
                     let samples_str: String = frame
                         .samples
                         .iter()
