@@ -16,7 +16,7 @@ mod command;
 mod db;
 mod voice;
 
-use command::command::*;
+use command::*;
 use db::DbPool;
 use voice::SharedRecordingState;
 
