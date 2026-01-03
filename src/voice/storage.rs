@@ -243,6 +243,7 @@ impl StorageWriter {
         info!("Flushing ssrc_map with {} entries", self.ssrc_map.len());
 
         let ssrc_map = self.ssrc_map.clone();
+        self.ssrc_map.clear();
         let path = self.session_dir.join("ssrc_map");
 
         tokio::task::spawn_blocking(move || {

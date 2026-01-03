@@ -34,7 +34,7 @@ pub struct RecordingSession {
 impl RecordingSession {
     pub fn new(guild_id: u64) -> Self {
         let timestamp = chrono::Utc::now();
-        let timestamp_str = timestamp.format("%Y%m%d_%H%M%S").to_string();
+        let timestamp_str = timestamp.format("%Y_%m_%d_%H_%M_%S").to_string();
         let session_dir = PathBuf::from("recordings")
             .join(guild_id.to_string())
             .join(&timestamp_str);
