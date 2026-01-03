@@ -5,16 +5,6 @@ use songbird::{
 };
 use std::{collections::HashMap, sync::Arc};
 use tokio::sync::Mutex;
-use tracing::info;
-
-/// Sample rate for audio (48kHz is Discord's native rate)
-pub const SAMPLE_RATE: u32 = 48000;
-/// Number of channels for capture (mono for speech)
-pub const CHANNELS: u16 = 1;
-/// Frame duration in milliseconds
-pub const FRAME_DURATION_MS: f32 = 20.0;
-/// Samples per 20ms frame at 48kHz mono
-pub const SAMPLES_PER_FRAME: usize = (SAMPLE_RATE as f32 * FRAME_DURATION_MS / 1000.0) as usize;
 
 pub struct RecordingState {
     pub active: bool,

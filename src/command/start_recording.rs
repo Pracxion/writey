@@ -3,20 +3,22 @@ use crate::Error;
 use crate::RecordingSession;
 use crate::voice::{Receiver, StorageWriter};
 use poise::serenity_prelude as serenity;
+use serenity::model::channel::{Channel, ChannelType};
+use serenity::model::id::{ChannelId, GuildId, UserId};
 use songbird::CoreEvent;
 use std::sync::Arc;
 use tracing::{error, info};
 
 async fn get_voice_channel(
     ctx: Context<'_>,
-    guild_id: serenity::model::id::GuildId,
-    user_id: serenity::model::id::UserId,
-    channel: Option<serenity::model::channel::Channel>,
-) -> Result<Option<serenity::model::id::ChannelId>, Error> {
+    guild_id: GuildId,
+    user_id: UserId,
+    channel: Option<Channel>,
+) -> Result<Option<ChannelId>, Error> {
     match channel {
         Some(ch) => match ch {
-            serenity::model::channel::Channel::Guild(ch) => {
-                if ch.kind == serenity::model::channel::ChannelType::Voice {
+            Channel::Guild(ch) => {
+                if ch.kind == ChannelType::Voice {
                     Ok(Some(ch.id))
                 } else {
                     ctx.say("The specified channel is not a voice channel!")
@@ -51,9 +53,7 @@ async fn get_voice_channel(
 #[poise::command(prefix_command, slash_command, rename = "start-recording", guild_only)]
 pub async fn start_recording(
     ctx: Context<'_>,
-    #[description = "Voice channel to record (leave empty to auto-detect)"] channel: Option<
-        serenity::model::channel::Channel,
-    >,
+    #[description = "Voice channel to record (leave empty to auto-detect)"] channel: Option<Channel>,
 ) -> Result<(), Error> {
     let guild_id = ctx
         .guild_id()
@@ -131,6 +131,8 @@ pub async fn start_recording(
         handler.add_global_event(CoreEvent::VoiceTick.into(), voice_tick_receiver);
     }
 
+    let session_dir_display = session.session_dir.display().to_string();
+
     {
         let mut sessions = ctx.data().active_sessions.lock().await;
         sessions.insert(guild_id_u64, session);
@@ -139,7 +141,7 @@ pub async fn start_recording(
     ctx.say(format!(
         "🎙️ **Recording started!**\n\
         📁 Session: `{}`",
-        session.session_dir.display()
+        session_dir_display
     ))
     .await?;
 
