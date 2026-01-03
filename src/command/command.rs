@@ -238,8 +238,7 @@ pub async fn start_recording(
 
     ctx.say(format!(
         "🎙️ **Recording started!**\n\
-        📁 Session: `{}`\n\
-        ⏱️ Use `/stop-recording` to stop and save.",
+        📁 Session: `{}`",
         session_id
     )).await?;
     
@@ -256,7 +255,7 @@ pub async fn stop_recording(ctx: Context<'_>) -> Result<(), Error> {
         sessions.remove(&guild_id_u64)
     };
 
-    let session = match session {
+    let mut session = match session {
         Some(s) => s,
         None => {
             ctx.say("No recording is active on this guild.").await?;

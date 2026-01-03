@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 use tracing::{info, warn, error};
+use poise::futures_util::TryFutureExt;
 
 const TICK_FLUSH_INTERVAL: Duration = Duration::from_secs(30);
 const SSRC_MAP_FLUSH_INTERVAL: Duration = Duration::from_secs(30);
@@ -108,7 +109,7 @@ impl StorageWriter {
                 }
             }
 
-            if let Err(e) = self.maybe_flush() {
+            if let Err(e) = self.try_flush() {
                 warn!("Periodic flush failed: {}", e);
             }
         }
@@ -116,7 +117,7 @@ impl StorageWriter {
         info!("Storage writer task ended");
     }
 
-    fn maybe_flush(&mut self) -> io::Result<()> {
+    fn try_flush(&mut self) -> io::Result<()> {
         if self.last_tick_flush.elapsed() >= TICK_FLUSH_INTERVAL {
             self.flush_ticks()?;
         }
@@ -164,7 +165,7 @@ impl StorageWriter {
             }
             Ok::<(), io::Error>(())
         })
-        .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("Task join error: {}", e)))?;
+        .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("Task join error: {}", e)));
     
         self.last_tick_flush = Instant::now();
         Ok(())
@@ -187,7 +188,7 @@ impl StorageWriter {
             serde_json::to_writer_pretty(writer, &ssrc_map)?;
             Ok::<(), io::Error>(())
         })
-        .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("Task join error: {}", e)))?;
+        .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("Task join error: {}", e)));
     
         self.last_ssrc_map_flush = Instant::now();
         Ok(())
