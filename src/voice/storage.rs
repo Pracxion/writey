@@ -3,8 +3,8 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs::File;
-use std::io::{self, BufWriter, Write};
-use std::path::{Path, PathBuf};
+use std::io::{self, BufWriter};
+use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 use tracing::{info, warn, error};
@@ -146,26 +146,36 @@ impl StorageWriter {
             self.last_tick_flush = Instant::now();
             return Ok(());
         }
-
+    
         info!("Flushing {} buffered frames to disk", total_frames);
-
-        for (ssrc, frames) in self.buffers.drain() {
-            let path = self.session_dir.join(format!("{}.json", ssrc));
-
-            let mut all_frames: Vec<AudioFrame> = if path.exists() {
-                let file = File::open(&path)?;
-                serde_json::from_reader(file).unwrap_or_default()
-            } else {
-                Vec::new()
-            };
-
-            all_frames.extend(frames);
-
-            let file = File::create(&path)?;
-            let writer = BufWriter::new(file);
-            serde_json::to_writer(writer, &all_frames)?;
-        }
-
+    
+        // Collect all data to flush
+        let frames_to_flush: Vec<(u64, Vec<AudioFrame>)> = self.buffers.drain().collect();
+        let session_dir = self.session_dir.clone();
+    
+        // Spawn blocking task for file I/O
+        let session_dir_clone = session_dir.clone();
+        tokio::task::spawn_blocking(move || {
+            for (ssrc, frames) in frames_to_flush {
+                let path = session_dir_clone.join(format!("{}.json", ssrc));
+    
+                let mut all_frames: Vec<AudioFrame> = if path.exists() {
+                    let file = File::open(&path)?;
+                    serde_json::from_reader(file).unwrap_or_default()
+                } else {
+                    Vec::new()
+                };
+    
+                all_frames.extend(frames);
+    
+                let file = File::create(&path)?;
+                let writer = BufWriter::new(file);
+                serde_json::to_writer(writer, &all_frames)?;
+            }
+            Ok::<(), io::Error>(())
+        })
+        .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("Task join error: {}", e)))?;
+    
         self.last_tick_flush = Instant::now();
         Ok(())
     }
@@ -175,18 +185,21 @@ impl StorageWriter {
             self.last_ssrc_map_flush = Instant::now();
             return Ok(());
         }
-
+    
         info!("Flushing ssrc_map with {} entries", self.ssrc_map.len());
+        
+        let ssrc_map = self.ssrc_map.clone();
         let path = self.session_dir.join("ssrc_map.json");
-        let file = File::create(&path)?;
-        let writer = BufWriter::new(file);
-        serde_json::to_writer_pretty(writer, &self.ssrc_map)?;
-
+        
+        tokio::task::spawn_blocking(move || {
+            let file = File::create(&path)?;
+            let writer = BufWriter::new(file);
+            serde_json::to_writer_pretty(writer, &ssrc_map)?;
+            Ok::<(), io::Error>(())
+        })
+        .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("Task join error: {}", e)))?;
+    
         self.last_ssrc_map_flush = Instant::now();
         Ok(())
-    }
-
-    pub fn session_dir(&self) -> &Path {
-        &self.session_dir
     }
 }

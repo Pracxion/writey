@@ -4,7 +4,6 @@ use crate::db;
 use poise::serenity_prelude as serenity;
 use songbird::CoreEvent;
 use std::sync::Arc;
-use tokio::task::JoinHandle;
 use tracing::{error, info};
 
 #[poise::command(prefix_command, slash_command, rename = "set-transcribe-name")]
@@ -252,12 +251,12 @@ pub async fn stop_recording(ctx: Context<'_>) -> Result<(), Error> {
     let guild_id = ctx.guild_id().ok_or("This command must be used in a guild")?;
     let guild_id_u64 = guild_id.get();
 
-    let mut session = {
+    let session = {
         let mut sessions = ctx.data().active_sessions.lock().await;
         sessions.remove(&guild_id_u64)
     };
 
-    let mut session = match session {
+    let session = match session {
         Some(s) => s,
         None => {
             ctx.say("No recording is active on this guild.").await?;
@@ -267,18 +266,15 @@ pub async fn stop_recording(ctx: Context<'_>) -> Result<(), Error> {
 
     ctx.defer().await?;
 
-    // Stop recording and get storage handle
     let storage_handle = {
         let mut state = session.state.lock().await;
         state.stop()
     };
 
-    // Signal storage writer to shutdown
     if let Some(handle) = storage_handle {
         handle.shutdown();
     }
 
-    // Wait for storage task to complete
     if let Some(task) = session.storage_task.take() {
         if let Err(e) = task.await {
             error!("Storage task panicked: {:?}", e);

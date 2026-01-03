@@ -10,7 +10,7 @@ use std::{
     sync::Arc,
 };
 use tokio::sync::Mutex;
-use tracing::{info, warn};
+use tracing::info;
 
 /// Sample rate for audio (48kHz is Discord's native rate)
 pub const SAMPLE_RATE: u32 = 48000;
@@ -111,25 +111,9 @@ impl EventHandler for Receiver {
                         }
                     };
 
-                    let stereo_sample_length = SAMPLES_PER_FRAME * 2;
-                    let mono_sample_length = SAMPLES_PER_FRAME;
-                    let mono_samples = match decoded.len() {
-                        stereo_sample_length => stereo_to_mono(decoded),
-                        mono_sample_length => decoded.clone(),
-                        _ => {
-                            warn!(
-                                "Unexpected audio frame size: {} (expected {} or {})",
-                                decoded.len(),
-                                stereo_sample_length,
-                                mono_sample_length
-                            );
-                            decoded.clone()
-                        }
-                    };
-
                     let frame = AudioFrame {
                         tick_index: current_tick,
-                        samples: mono_samples,
+                        samples: stereo_to_mono(decoded),
                     };
                     
                     if let Some(ref storage) = state.storage {

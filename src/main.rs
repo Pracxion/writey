@@ -10,7 +10,7 @@ use serenity::{
     prelude::*,
     Client,
 };
-use songbird::{Config, SerenityInit, Songbird, driver::DecodeMode};
+use songbird::{Config, SerenityInit, driver::DecodeMode};
 use std::{
     collections::HashMap,
     sync::Arc,
@@ -25,7 +25,6 @@ use dotenvy::dotenv;
 mod command;
 mod db;
 mod voice;
-mod transcription;
 
 use command::command::*;
 use db::DbPool;
@@ -100,7 +99,7 @@ impl EventHandler for Handler {
         info!("Gateway version: {:?}", ready.version);
     }
 
-    async fn message(&self, ctx: serenity::Context, msg: Message) {
+    async fn message(&self, _ctx: serenity::Context, msg: Message) {
         if msg.author.bot {
             return;
         }
