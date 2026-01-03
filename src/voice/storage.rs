@@ -9,7 +9,7 @@ use tracing::{error, info, warn};
 
 const TICK_FLUSH_INTERVAL: Duration = Duration::from_secs(30);
 const SSRC_MAP_FLUSH_INTERVAL: Duration = Duration::from_secs(30);
-const CHUNK_DURATION: Duration = Duration::from_secs(10 * 60); // 10 minutes
+const CHUNK_DURATION: Duration = Duration::from_secs(10 * 60);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AudioFrame {
@@ -52,11 +52,8 @@ struct SsrcChunkState {
 pub struct StorageWriter {
     session_dir: PathBuf,
     users_dir: PathBuf,
-    /// Buffers frames by ssrc
     buffers: HashMap<u32, Vec<AudioFrame>>,
-    /// Maps ssrc -> user_id (for reference only)
     ssrc_map: HashMap<u32, u64>,
-    /// Tracks chunk state per ssrc
     ssrc_chunks: HashMap<u32, SsrcChunkState>,
     session_start: Instant,
     last_tick_flush: Instant,
@@ -242,7 +239,7 @@ impl StorageWriter {
 
         let ssrc_map = self.ssrc_map.clone();
         self.ssrc_map.clear();
-        let path = self.session_dir.join("ssrc_map");
+        let path = self.session_dir.join("ssrc_map.json");
 
         tokio::task::spawn_blocking(move || {
             let file = File::create(&path)?;
