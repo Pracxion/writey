@@ -7,6 +7,8 @@ RUN apt-get update && apt-get install -y \
     pkg-config \
     libssl-dev \
     libsqlite3-dev \
+    clang \
+    libclang-dev \
     && rm -rf /var/lib/apt/lists/*
 RUN cargo build --release
 
@@ -16,11 +18,12 @@ RUN apt-get update && apt-get install -y \
     ca-certificates \
     libssl3 \
     libsqlite3-0 \
+    libstdc++6 \
     && rm -rf /var/lib/apt/lists/*
 RUN useradd -m -u 1000 appuser
 COPY --from=builder /var/build/writey/target/release/writey ./writey
 COPY --from=builder /var/build/writey/migrations ./migrations
-RUN mkdir -p recordings settings && chown -R appuser:appuser recordings settings
+RUN mkdir -p recordings settings models/whisper && chown -R appuser:appuser recordings settings models
 USER appuser
 CMD ["./writey"]
 
@@ -31,6 +34,8 @@ RUN apt-get update && apt-get install -y \
     pkg-config \
     libssl-dev \
     libsqlite3-dev \
+    clang \
+    libclang-dev \
     && rm -rf /var/lib/apt/lists/*
 RUN cargo install cargo-watch
 CMD ["cargo", "watch", "-x", "build"]
@@ -42,6 +47,8 @@ RUN apt-get update && apt-get install -y \
     pkg-config \
     libssl-dev \
     libsqlite3-dev \
+    clang \
+    libclang-dev \
     && rm -rf /var/lib/apt/lists/*
 RUN cargo install cargo-watch
 CMD ["cargo", "watch", "-x", "run"]

@@ -11,9 +11,11 @@ use std::{collections::HashMap, path::PathBuf, sync::Arc, time::Duration};
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 use tracing::info;
+use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
 
 mod command;
 mod db;
+mod transcribe;
 mod voice;
 
 use command::*;
@@ -89,7 +91,20 @@ impl EventHandler for Handler {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     dotenv().ok();
-    tracing_subscriber::fmt::init();
+    let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+    let udp_rx_filter = tracing_subscriber::filter::FilterFn::new(move |meta| {
+        if meta.target().contains("songbird::driver::tasks::udp_rx") {
+            false
+        } else {
+            true
+        }
+    });
+
+    tracing_subscriber::registry()
+        .with(env_filter)
+        .with(udp_rx_filter)
+        .with(fmt::layer())
+        .init();
 
     let database_url = std::env::var("DATABASE_URL").unwrap();
     let db_pool = db::init_db(&database_url)
@@ -107,6 +122,7 @@ async fn main() -> anyhow::Result<()> {
             start_recording(),
             stop_recording(),
             reconstruct_audio(),
+            transcribe_session(),
         ],
         prefix_options: poise::PrefixFrameworkOptions {
             prefix: Some("/".into()),
