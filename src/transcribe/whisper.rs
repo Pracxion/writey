@@ -271,6 +271,8 @@ pub struct Transcriber {
     ctx: WhisperContext,
     model: WhisperModel,
     language_config: LanguageConfig,
+    /// Number of threads to use (0 = auto)
+    n_threads: i32,
 }
 
 impl Transcriber {
@@ -292,30 +294,67 @@ impl Transcriber {
         )
         .map_err(|e| WhisperError::Init(format!("Failed to load model: {}", e)))?;
         
-        info!("Whisper model loaded successfully");
+        // Use available CPU threads (leave 1 for system)
+        let n_threads = std::thread::available_parallelism()
+            .map(|p| (p.get() as i32).max(1))
+            .unwrap_or(4);
+        
+        info!("Whisper model loaded successfully (using {} threads)", n_threads);
         info!("Language config: {:?}", language_config);
         
-        Ok(Self { ctx, model, language_config })
+        Ok(Self { ctx, model, language_config, n_threads })
     }
 
-    /// Transcribe an audio chunk
+    /// Transcribe an audio chunk (optimized for speed)
     pub fn transcribe_chunk(&self, chunk: &AudioChunk) -> Result<ChunkTranscription, WhisperError> {
+        let start_time = std::time::Instant::now();
+        
         info!(
-            "Transcribing chunk {} ({:.2}s - {:.2}s, {:.2}s)",
-            chunk.index, chunk.start_time_secs, chunk.end_time_secs, chunk.duration_secs
+            "Transcribing chunk {} ({:.2}s audio)",
+            chunk.index, chunk.duration_secs
         );
 
-        // Set up parameters with beam search for better accuracy with mixed languages
-        let mut params = FullParams::new(SamplingStrategy::BeamSearch { 
-            beam_size: 5,
-            patience: 1.0,
-        });
+        // Use greedy sampling for speed (beam search is 2-3x slower)
+        let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
         
-        // Enable timestamps
-        params.set_token_timestamps(true);
-        params.set_max_len(0); // No length limit, natural segmentation
+        // ===== SPEED OPTIMIZATIONS =====
         
-        // Language configuration for mixed German/English
+        // Use multiple CPU threads
+        params.set_n_threads(self.n_threads);
+        
+        // Single segment mode for shorter chunks (faster)
+        if chunk.duration_secs < 30.0 {
+            params.set_single_segment(true);
+        }
+        
+        // Disable token-level timestamps (segment-level is enough, faster)
+        params.set_token_timestamps(false);
+        
+        // ===== HALLUCINATION PREVENTION =====
+        
+        // Detect silence/no speech - skip segments with high no_speech probability
+        params.set_no_speech_thold(0.6); // If >60% likely no speech, skip
+        
+        // Higher entropy threshold = more likely to stop on repetitive/uncertain output
+        params.set_entropy_thold(2.4);
+        
+        // Log probability threshold - reject low confidence outputs
+        params.set_logprob_thold(-1.0);
+        
+        // Temperature fallback for better quality (reduces hallucination)
+        params.set_temperature(0.0); // Start with greedy (deterministic)
+        params.set_temperature_inc(0.2); // Increase if decoding fails
+        
+        // Don't use previous context (prevents hallucination propagation)
+        params.set_no_context(true);
+        
+        // Suppress non-speech tokens (music, noise descriptions)
+        params.set_suppress_non_speech_tokens(true);
+        
+        // Limit max segment length to prevent long repetitive outputs
+        params.set_max_len(80); // Max ~80 chars per segment
+        
+        // ===== LANGUAGE CONFIGURATION =====
         match &self.language_config.language {
             Some(lang) => params.set_language(Some(lang)),
             None => params.set_language(Some("auto")), // Auto-detect
@@ -323,9 +362,6 @@ impl Transcriber {
         
         // Translation setting
         params.set_translate(self.language_config.translate);
-        
-        // Suppress non-speech tokens for cleaner output
-        params.set_suppress_non_speech_tokens(true);
         
         // Print progress
         params.set_print_progress(false);
@@ -349,6 +385,10 @@ impl Transcriber {
         let mut segments = Vec::new();
         let mut full_text = String::new();
         
+        let mut last_text: Option<String> = None;
+        let mut repeat_count = 0;
+        const MAX_REPEATS: usize = 2; // Allow max 2 consecutive identical segments
+        
         for i in 0..num_segments {
             let start_ts = state.full_get_segment_t0(i)
                 .map_err(|e| WhisperError::Transcription(format!("Failed to get start time: {}", e)))?;
@@ -357,22 +397,41 @@ impl Transcriber {
             let text = state.full_get_segment_text(i)
                 .map_err(|e| WhisperError::Transcription(format!("Failed to get text: {}", e)))?;
             
+            let text = text.trim().to_string();
+            if text.is_empty() {
+                continue;
+            }
+            
             // Timestamps are in centiseconds (1/100 second)
             let start_secs = start_ts as f32 / 100.0;
             let end_secs = end_ts as f32 / 100.0;
             
-            if !text.trim().is_empty() {
-                segments.push(TranscribedSegment {
-                    start_secs,
-                    end_secs,
-                    text: text.trim().to_string(),
-                });
-                
-                if !full_text.is_empty() {
-                    full_text.push(' ');
+            // ===== HALLUCINATION DETECTION =====
+            // Check for repeated text (hallucination symptom)
+            let is_repeat = last_text.as_ref().map(|lt| lt == &text).unwrap_or(false);
+            
+            if is_repeat {
+                repeat_count += 1;
+                if repeat_count >= MAX_REPEATS {
+                    // Skip this repeated segment - likely hallucination
+                    continue;
                 }
-                full_text.push_str(text.trim());
+            } else {
+                repeat_count = 0;
             }
+            
+            last_text = Some(text.clone());
+            
+            segments.push(TranscribedSegment {
+                start_secs,
+                end_secs,
+                text: text.clone(),
+            });
+            
+            if !full_text.is_empty() {
+                full_text.push(' ');
+            }
+            full_text.push_str(&text);
         }
         
         // Try to get detected language
@@ -380,12 +439,29 @@ impl Transcriber {
             .ok()
             .and_then(|id| whisper_rs::get_lang_str(id).map(|s| s.to_string()));
 
-        info!(
-            "Transcribed chunk {}: {} segments, {} chars",
-            chunk.index,
-            segments.len(),
-            full_text.len()
-        );
+        let elapsed = start_time.elapsed();
+        let realtime_factor = chunk.duration_secs / elapsed.as_secs_f32();
+        
+        // Log if we filtered hallucinations
+        let filtered = num_segments as i32 - segments.len() as i32;
+        if filtered > 0 {
+            info!(
+                "Transcribed chunk {} in {:.1}s ({:.1}x realtime): {} segments ({} hallucinations filtered)",
+                chunk.index,
+                elapsed.as_secs_f32(),
+                realtime_factor,
+                segments.len(),
+                filtered
+            );
+        } else {
+            info!(
+                "Transcribed chunk {} in {:.1}s ({:.1}x realtime): {} segments",
+                chunk.index,
+                elapsed.as_secs_f32(),
+                realtime_factor,
+                segments.len()
+            );
+        }
 
         Ok(ChunkTranscription {
             chunk_index: chunk.index,
@@ -398,14 +474,38 @@ impl Transcriber {
     }
 
     /// Transcribe multiple chunks
+    /// Transcribe multiple chunks sequentially with progress tracking
     pub fn transcribe_chunks(&self, chunks: &[AudioChunk]) -> Result<Vec<ChunkTranscription>, WhisperError> {
-        info!("Transcribing {} chunks...", chunks.len());
+        let total_audio_secs: f32 = chunks.iter().map(|c| c.duration_secs).sum();
+        info!(
+            "Transcribing {} chunks ({:.1}s total audio)...",
+            chunks.len(),
+            total_audio_secs
+        );
         
+        let start_time = std::time::Instant::now();
         let mut transcriptions = Vec::new();
+        let mut processed_audio = 0.0f32;
         
-        for chunk in chunks {
+        for (i, chunk) in chunks.iter().enumerate() {
             match self.transcribe_chunk(chunk) {
-                Ok(t) => transcriptions.push(t),
+                Ok(t) => {
+                    processed_audio += chunk.duration_secs;
+                    let progress = (i + 1) as f32 / chunks.len() as f32 * 100.0;
+                    let elapsed = start_time.elapsed().as_secs_f32();
+                    let eta = if i > 0 {
+                        elapsed / (i + 1) as f32 * (chunks.len() - i - 1) as f32
+                    } else {
+                        0.0
+                    };
+                    
+                    info!(
+                        "Progress: {:.0}% ({}/{}) - ETA: {:.0}s",
+                        progress, i + 1, chunks.len(), eta
+                    );
+                    
+                    transcriptions.push(t);
+                }
                 Err(e) => {
                     warn!("Failed to transcribe chunk {}: {}", chunk.index, e);
                     // Continue with other chunks
@@ -413,12 +513,27 @@ impl Transcriber {
             }
         }
         
+        let total_elapsed = start_time.elapsed();
+        let overall_realtime = total_audio_secs / total_elapsed.as_secs_f32();
+        
+        info!(
+            "Completed {} chunks in {:.1}s ({:.1}x realtime overall)",
+            transcriptions.len(),
+            total_elapsed.as_secs_f32(),
+            overall_realtime
+        );
+        
         Ok(transcriptions)
     }
     
     /// Get the model being used
     pub fn model(&self) -> WhisperModel {
         self.model
+    }
+    
+    /// Get number of threads being used
+    pub fn threads(&self) -> i32 {
+        self.n_threads
     }
 }
 

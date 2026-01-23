@@ -11,6 +11,30 @@ services:
     volumes:
       - ./recordings:/app/recordings
       - ./settings:/app/settings
+      - ./models:/app/models
+
+  # GPU-accelerated version (requires NVIDIA GPU + nvidia-container-toolkit)
+  writey-cuda:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: cuda-prod
+    container_name: writey-cuda
+    restart: unless-stopped
+    user: root  # Run as root to avoid permission issues with mounted volumes
+    env_file:
+      - .env
+    volumes:
+      - ./recordings:/app/recordings
+      - ./settings:/app/settings
+      - ./models:/app/models
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
 
   dev-run:
     build:
