@@ -13,46 +13,17 @@ serenity = { version = "0.12", default-features = false, features = [
   "cache",
 ]}
 
-songbird = { version = "0.5", features = ["serenity", "gateway", "driver", "receive", "rustls"] }
+songbird = { version = "0.6", features = ["serenity", "gateway", "driver", "receive", "rustls"] }
 
 anyhow = "1.0"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 poise = "0.6"
 
-dashmap = "6"
-byteorder = "1.5"
 hound = "3.5"
 dotenvy = "0.15"
-
-sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite", "migrate"] }
-
-# Time and date handling
-chrono = { version = "0.4", features = ["serde"] }
-
-# Async traits
+chrono = "0.4"
 async-trait = "0.1"
-
-# Serialization for transcripts
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-
-# Error handling
-thiserror = "1.0"
-
-# Whisper.cpp bindings for local transcription
-whisper-rs = "0.13"
-
-# HTTP client for downloading models
-reqwest = { version = "0.12", features = ["blocking", "stream"] }
-
-# Progress bars for downloads
-indicatif = "0.17"
 
 [dev-dependencies]
 tempfile = "3.10"
-
-[features]
-default = []
-# Enable NVIDIA GPU acceleration (requires CUDA toolkit installed)
-cuda = ["whisper-rs/cuda"]

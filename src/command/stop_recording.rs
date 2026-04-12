@@ -48,10 +48,10 @@ pub async fn stop_recording(ctx: Context<'_>) -> Result<(), Error> {
         handle.shutdown();
     }
 
-    if let Some(task) = session.storage_task.take() {
-        if let Err(e) = task.await {
-            error!("Storage task panicked: {:?}", e);
-        }
+    if let Some(task) = session.storage_task.take()
+        && let Err(e) = task.await
+    {
+        error!("Storage task panicked: {:?}", e);
     }
 
     let manager = songbird::get(ctx.serenity_context())

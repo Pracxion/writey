@@ -1,4 +1,3 @@
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
 use std::io::{self, BufWriter, Write};
@@ -11,7 +10,7 @@ const TICK_FLUSH_INTERVAL: Duration = Duration::from_secs(30);
 const SSRC_MAP_FLUSH_INTERVAL: Duration = Duration::from_secs(30);
 const CHUNK_DURATION: Duration = Duration::from_secs(10 * 60);
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct AudioFrame {
     pub tick_index: u64,
     pub samples: Vec<i16>,
@@ -21,7 +20,6 @@ pub struct AudioFrame {
 pub enum StorageMessage {
     Frame { ssrc: u32, frame: AudioFrame },
     SsrcMap(HashMap<u32, u64>),
-    Flush,
     Shutdown,
 }
 
@@ -55,7 +53,6 @@ pub struct StorageWriter {
     buffers: HashMap<u32, Vec<AudioFrame>>,
     ssrc_map: HashMap<u32, u64>,
     ssrc_chunks: HashMap<u32, SsrcChunkState>,
-    session_start: Instant,
     last_tick_flush: Instant,
     last_ssrc_map_flush: Instant,
     rx: mpsc::UnboundedReceiver<StorageMessage>,
@@ -78,7 +75,6 @@ impl StorageWriter {
             buffers: HashMap::new(),
             ssrc_map: HashMap::new(),
             ssrc_chunks: HashMap::new(),
-            session_start: now,
             last_tick_flush: now,
             last_ssrc_map_flush: now,
             rx,
@@ -98,11 +94,6 @@ impl StorageWriter {
                     }
                     StorageMessage::SsrcMap(map) => {
                         self.ssrc_map = map;
-                    }
-                    StorageMessage::Flush => {
-                        if let Err(e) = self.flush_all() {
-                            error!("Failed to flush: {}", e);
-                        }
                     }
                     StorageMessage::Shutdown => {
                         info!("Storage writer shutting down");
@@ -242,9 +233,14 @@ impl StorageWriter {
         let path = self.session_dir.join("ssrc_map.json");
 
         tokio::task::spawn_blocking(move || {
-            let file = File::create(&path)?;
-            let writer = BufWriter::new(file);
-            serde_json::to_writer_pretty(writer, &ssrc_map)?;
+            let mut writer = BufWriter::new(File::create(&path)?);
+            writeln!(writer, "{{")?;
+            let mut iter = ssrc_map.iter().peekable();
+            while let Some((ssrc, user_id)) = iter.next() {
+                let comma = if iter.peek().is_some() { "," } else { "" };
+                writeln!(writer, "  \"{}\": {}{}", ssrc, user_id, comma)?;
+            }
+            writeln!(writer, "}}")?;
             Ok::<(), io::Error>(())
         });
 

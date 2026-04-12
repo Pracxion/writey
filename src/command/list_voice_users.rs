@@ -1,5 +1,6 @@
 use crate::Context;
 use crate::Error;
+use crate::voice::resolve_voice_channel;
 use poise::serenity_prelude as serenity;
 
 #[poise::command(prefix_command, slash_command, rename = "list-voice-users", guild_only)]
@@ -13,39 +14,9 @@ pub async fn list_voice_users(
         .ok_or("This command must be used in a guild")?;
     let user_id = ctx.author().id;
 
-    let voice_channel_id = if let Some(ch) = channel {
-        match ch {
-            serenity::model::channel::Channel::Guild(ch) => {
-                if ch.kind == serenity::model::channel::ChannelType::Voice {
-                    ch.id
-                } else {
-                    ctx.say("The specified channel is not a voice channel!")
-                        .await?;
-                    return Ok(());
-                }
-            }
-            _ => {
-                ctx.say("Invalid channel type!").await?;
-                return Ok(());
-            }
-        }
-    } else {
-        let cache = &ctx.serenity_context().cache;
-
-        let channel_id = cache.guild(guild_id).and_then(|guild| {
-            guild
-                .voice_states
-                .get(&user_id)
-                .and_then(|vs| vs.channel_id)
-        });
-
-        match channel_id {
-            Some(id) => id,
-            None => {
-                ctx.say("You're not in a voice channel. Please join one or specify a channel: `/list-voice-users channel:#voice-channel`").await?;
-                return Ok(());
-            }
-        }
+    let voice_channel_id = match resolve_voice_channel(ctx, guild_id, user_id, channel).await? {
+        Some(id) => id,
+        None => return Ok(()),
     };
 
     let cache = &ctx.serenity_context().cache;
@@ -69,7 +40,7 @@ pub async fn list_voice_users(
             let display_name = user
                 .global_name
                 .as_deref()
-                .unwrap_or_else(|| user.name.as_str());
+                .unwrap_or(user.name.as_str());
 
             users_in_channel.push((user_id, display_name.to_string(), user.name.clone()));
         } else {
@@ -77,7 +48,7 @@ pub async fn list_voice_users(
                 let display_name = user
                     .global_name
                     .as_deref()
-                    .unwrap_or_else(|| user.name.as_str());
+                    .unwrap_or(user.name.as_str());
                 users_in_channel.push((user_id, display_name.to_string(), user.name.clone()));
             } else {
                 users_in_channel.push((

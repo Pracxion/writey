@@ -61,16 +61,14 @@ impl EventHandler for Receiver {
             EventContext::SpeakingStateUpdate(Speaking {
                 speaking: _,
                 ssrc,
-                user_id,
+                user_id: Some(user_id),
                 ..
             }) => {
-                if let Some(user_id) = user_id {
-                    let mut state = self.state.lock().await;
-                    state.ssrc_map.insert(*ssrc, user_id.0);
+                let mut state = self.state.lock().await;
+                state.ssrc_map.insert(*ssrc, user_id.0);
 
-                    if let Some(ref storage) = state.storage {
-                        storage.update_ssrc_map(state.ssrc_map.clone());
-                    }
+                if let Some(ref storage) = state.storage {
+                    storage.update_ssrc_map(state.ssrc_map.clone());
                 }
             }
             EventContext::VoiceTick(VoiceTick {
@@ -99,15 +97,7 @@ impl EventHandler for Receiver {
 
                     let samples = stereo_to_mono(decoded);
 
-                    let mut is_every_sample_zero = true;
-                    for sample in samples {
-                        if sample != 0 {
-                            is_every_sample_zero = false;
-                            break;
-                        }
-                    }
-
-                    if is_every_sample_zero {
+                    if samples.iter().all(|&s| s == 0) {
                         continue;
                     }
 
@@ -116,7 +106,7 @@ impl EventHandler for Receiver {
                             *ssrc,
                             AudioFrame {
                                 tick_index: current_tick,
-                                samples: stereo_to_mono(decoded),
+                                samples,
                             },
                         );
                     }

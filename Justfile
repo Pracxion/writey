@@ -1,54 +1,18 @@
-# Docker commands
 default:
     @just --list
 
-# Start containers in detached mode
-up:
-    docker compose up -d
+# Install system deps and Rust toolchain (run once, requires root)
+setup:
+    bash setup.sh
 
-# Stop and remove containers
-down:
-    docker compose down
+# Run the bot in development mode (unoptimized, fast compile)
+dev:
+    OPUS_STATIC=0 cargo run
 
-# View logs
-logs:
-    docker compose logs -f
-
-# Restart containers
-restart:
-    docker compose restart
-
-# Stop containers (without removing)
-stop:
-    docker compose stop
-
-# Start stopped containers
-start:
-    docker compose start
-
-# Show container status
-ps:
-    docker compose ps
-
-# Execute command in container
-exec cmd:
-    docker compose exec writey {{cmd}}
-
-# View container logs (tail)
-tail lines="100":
-    docker compose logs --tail={{lines}} -f
-
-# Watch for Rust changes and rebuild/run in container
-# Usage: just watch [build|run] (default: build)
-watch mode="build":
-    @if [ "{{mode}}" = "build" ]; then \
-        docker compose up dev-build; \
-    elif [ "{{mode}}" = "run" ]; then \
-        docker compose up dev-run; \
-    else \
-        echo "Invalid mode. Use 'build' or 'run'"; \
-        exit 1; \
-    fi
+# Build and run optimized release binary
+run:
+    OPUS_STATIC=0 cargo build --release
+    ./target/release/writey
 
 format:
     cargo fmt
@@ -58,4 +22,3 @@ clippy:
 
 check:
     cargo check
-

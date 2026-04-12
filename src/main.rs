@@ -2,11 +2,10 @@ use anyhow::Context as _;
 use dotenvy::dotenv;
 use poise::serenity_prelude as serenity;
 use serenity::{
-    Client, async_trait,
-    model::{channel::Message, gateway::GatewayIntents, gateway::Ready},
-    prelude::*,
+    Client,
+    model::gateway::GatewayIntents,
 };
-use songbird::{Config, SerenityInit, driver::DecodeMode};
+use songbird::{Config, SerenityInit, driver::{DecodeMode, DecodeConfig}};
 use std::{collections::HashMap, path::PathBuf, sync::Arc, time::Duration};
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
@@ -14,12 +13,9 @@ use tracing::info;
 use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
 
 mod command;
-mod db;
-mod transcribe;
 mod voice;
 
 use command::*;
-use db::DbPool;
 use voice::SharedRecordingState;
 
 pub type Error = Box<dyn std::error::Error + Send + Sync>;
@@ -59,45 +55,29 @@ type ActiveSessions = HashMap<u64, RecordingSession>;
 
 pub struct Data {
     pub active_sessions: Mutex<ActiveSessions>,
-    pub db: DbPool,
 }
 
 async fn on_error(error: poise::FrameworkError<'_, Data, Error>) {
     match error {
         poise::FrameworkError::Setup { error, .. } => panic!("Failed to start bot: {:?}", error),
         poise::FrameworkError::Command { error, ctx, .. } => {
-            println!("Error in command `{}`: {:?}", ctx.command().name, error,);
+            tracing::error!("Error in command `{}`: {:?}", ctx.command().name, error);
         }
         error => {
             if let Err(e) = poise::builtins::on_error(error).await {
-                println!("Error while handling error: {}", e)
+                tracing::error!("Error while handling error: {}", e);
             }
         }
     }
 }
 
-struct Handler;
-
-#[async_trait]
-impl EventHandler for Handler {
-    async fn ready(&self, _ctx: serenity::Context, ready: Ready) {
-        info!("Logged in as {}", ready.user.name);
-        info!("Bot ID: {}", ready.user.id);
-        info!("Connected to {} guilds", ready.guilds.len());
-        info!("Gateway version: {:?}", ready.version);
-    }
-}
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     dotenv().ok();
     let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
-    let udp_rx_filter = tracing_subscriber::filter::FilterFn::new(move |meta| {
-        if meta.target().contains("songbird::driver::tasks::udp_rx") {
-            false
-        } else {
-            true
-        }
+    let udp_rx_filter = tracing_subscriber::filter::FilterFn::new(|meta| {
+        !meta.target().contains("songbird::driver::tasks::udp_rx")
     });
 
     tracing_subscriber::registry()
@@ -106,23 +86,14 @@ async fn main() -> anyhow::Result<()> {
         .with(fmt::layer())
         .init();
 
-    let database_url = std::env::var("DATABASE_URL").unwrap();
-    let db_pool = db::init_db(&database_url)
-        .await
-        .context("Failed to initialize database")?;
-    info!("Database initialized successfully");
-
     std::fs::create_dir_all("recordings").ok();
 
     let options = poise::FrameworkOptions {
         commands: vec![
-            set_transcribe_name(),
-            get_transcribe_name(),
             list_voice_users(),
             start_recording(),
             stop_recording(),
             reconstruct_audio(),
-            transcribe_session(),
         ],
         prefix_options: poise::PrefixFrameworkOptions {
             prefix: Some("/".into()),
@@ -131,39 +102,15 @@ async fn main() -> anyhow::Result<()> {
             ))),
             ..Default::default()
         },
-        // The global error handler for all error cases that may occur
         on_error: |error| Box::pin(on_error(error)),
-        // This code is run before every command
         pre_command: |ctx| {
             Box::pin(async move {
-                println!("Executing command {}...", ctx.command().qualified_name);
+                info!("Executing command {}", ctx.command().qualified_name);
             })
         },
-        // This code is run after a command if it was successful (returned Ok)
         post_command: |ctx| {
             Box::pin(async move {
-                println!("Executed command {}!", ctx.command().qualified_name);
-            })
-        },
-        // Every command invocation must pass this check to continue execution
-        command_check: Some(|ctx| {
-            Box::pin(async move {
-                if ctx.author().id.get() == 123456789 {
-                    return Ok(false);
-                }
-                Ok(true)
-            })
-        }),
-        // Enforce command checks even for owners (enforced by default)
-        // Set to true to bypass checks, which is useful for testing
-        skip_checks_for_owners: false,
-        event_handler: |_ctx, event, _framework, _data| {
-            Box::pin(async move {
-                println!(
-                    "Got an event in event handler: {:?}",
-                    event.snake_case_name()
-                );
-                Ok(())
+                info!("Executed command {}", ctx.command().qualified_name);
             })
         },
         ..Default::default()
@@ -178,9 +125,8 @@ async fn main() -> anyhow::Result<()> {
 
     let framework = poise::Framework::builder()
         .setup(move |ctx, _ready, framework| {
-            let db = db_pool.clone();
             Box::pin(async move {
-                println!("Logged in as {}", _ready.user.name);
+                info!("Logged in as {}", _ready.user.name);
                 poise::builtins::register_globally(ctx, &framework.options().commands).await?;
 
                 if let Ok(guild_id_str) = std::env::var("GUILD_ID") {
@@ -194,20 +140,19 @@ async fn main() -> anyhow::Result<()> {
                         .await?;
                         info!("Registered commands for guild {}", guild_id);
                     } else {
-                        eprintln!("Invalid GUILD_ID format: {}", guild_id_str);
+                        tracing::error!("Invalid GUILD_ID format: {}", guild_id_str);
                     }
                 }
 
                 Ok(Data {
                     active_sessions: Mutex::new(HashMap::new()),
-                    db,
                 })
             })
         })
         .options(options)
         .build();
 
-    let songbird_config = Config::default().decode_mode(DecodeMode::Decode);
+    let songbird_config = Config::default().decode_mode(DecodeMode::Decode(DecodeConfig::default()));
 
     let mut client = Client::builder(token, intents)
         .framework(framework)

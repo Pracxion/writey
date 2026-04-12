@@ -4,50 +4,17 @@ use hound::{WavSpec, WavWriter};
 use std::collections::BTreeMap;
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tracing::info;
 
 const SAMPLE_RATE: u32 = 48000;
 const SAMPLES_PER_FRAME: usize = 960;
 
-#[derive(Debug)]
-struct AudioFrame {
-    tick_index: u64,
-    samples: Vec<i16>,
-}
+type UserAudio = (String, BTreeMap<u64, Vec<i16>>, u64);
 
-fn parse_log_file(path: &PathBuf) -> Result<Vec<AudioFrame>, Box<dyn std::error::Error + Send + Sync>> {
-    let file = File::open(path)?;
-    let reader = BufReader::new(file);
-    let mut frames = Vec::new();
-
-    for line in reader.lines() {
-        let line = line?;
-        let line = line.trim();
-        if line.is_empty() {
-            continue;
-        }
-
-        let mut parts = line.splitn(2, ' ');
-        let tick_str = parts.next().ok_or("Missing tick index")?;
-        let samples_str = parts.next().ok_or("Missing samples")?;
-
-        let tick_index: u64 = tick_str.parse()?;
-        let samples: Vec<i16> = samples_str
-            .split(',')
-            .map(|s| s.trim().parse::<i16>())
-            .collect::<Result<Vec<_>, _>>()?;
-
-        frames.push(AudioFrame { tick_index, samples });
-    }
-
-    Ok(frames)
-}
-
-fn load_user_audio(user_dir: &PathBuf) -> Result<BTreeMap<u64, Vec<i16>>, Box<dyn std::error::Error + Send + Sync>> {
-    let mut all_frames: BTreeMap<u64, Vec<i16>> = BTreeMap::new();
-
-    // Find all chunk-*.log files
+fn load_user_chunks(
+    user_dir: &Path,
+) -> Result<BTreeMap<u64, Vec<i16>>, Box<dyn std::error::Error + Send + Sync>> {
     let mut chunk_files: Vec<PathBuf> = fs::read_dir(user_dir)?
         .filter_map(|e| e.ok())
         .map(|e| e.path())
@@ -59,27 +26,44 @@ fn load_user_audio(user_dir: &PathBuf) -> Result<BTreeMap<u64, Vec<i16>>, Box<dy
         })
         .collect();
 
-    // Sort by chunk number
-    chunk_files.sort_by(|a, b| {
-        let get_num = |p: &PathBuf| -> u32 {
-            p.file_stem()
-                .and_then(|s| s.to_str())
-                .and_then(|s| s.strip_prefix("chunk-"))
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(0)
-        };
-        get_num(a).cmp(&get_num(b))
+    chunk_files.sort_by_key(|p| {
+        p.file_stem()
+            .and_then(|s| s.to_str())
+            .and_then(|s| s.strip_prefix("chunk-"))
+            .and_then(|s| s.parse::<u32>().ok())
+            .unwrap_or(0)
     });
 
-    for chunk_path in chunk_files {
-        info!("Loading {:?}", chunk_path);
-        let frames = parse_log_file(&chunk_path)?;
-        for frame in frames {
-            all_frames.insert(frame.tick_index, frame.samples);
+    let mut frames: BTreeMap<u64, Vec<i16>> = BTreeMap::new();
+
+    for path in chunk_files {
+        let file = File::open(&path)?;
+        for (i, line) in BufReader::new(file).lines().enumerate() {
+            let line = line?;
+            let line = line.trim();
+            if line.is_empty() {
+                continue;
+            }
+
+            let mut parts = line.splitn(2, ' ');
+            let tick: u64 = parts
+                .next()
+                .ok_or_else(|| format!("Missing tick at line {}", i + 1))?
+                .parse()
+                .map_err(|_| format!("Invalid tick at line {}", i + 1))?;
+            let samples: Vec<i16> = parts
+                .next()
+                .ok_or_else(|| format!("Missing samples at line {}", i + 1))?
+                .split(',')
+                .map(|s| s.trim().parse::<i16>())
+                .collect::<Result<_, _>>()
+                .map_err(|_| format!("Invalid sample data at line {}", i + 1))?;
+
+            frames.insert(tick, samples);
         }
     }
 
-    Ok(all_frames)
+    Ok(frames)
 }
 
 fn write_wav(
@@ -98,7 +82,6 @@ fn write_wav(
     };
 
     let mut writer = WavWriter::create(output_path, spec)?;
-
     let first_tick = *frames.keys().next().unwrap();
     let last_tick = *frames.keys().next_back().unwrap();
 
@@ -110,11 +93,9 @@ fn write_wav(
     );
 
     let silence = vec![0i16; SAMPLES_PER_FRAME];
-
     for tick in first_tick..=last_tick {
-        let samples = frames.get(&tick).unwrap_or(&silence);
-        for &sample in samples {
-            writer.write_sample(sample)?;
+        for &s in frames.get(&tick).unwrap_or(&silence) {
+            writer.write_sample(s)?;
         }
     }
 
@@ -123,37 +104,29 @@ fn write_wav(
 }
 
 fn merge_wavs(
-    user_audio: &[(String, BTreeMap<u64, Vec<i16>>, u64)],
+    user_audio: &[UserAudio],
     output_path: &PathBuf,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     if user_audio.is_empty() {
         return Err("No audio to merge".into());
     }
 
-    // Find the earliest first tick and latest last tick across all users
-    let earliest_first_tick = user_audio
+    let earliest = user_audio.iter().map(|(_, _, t)| *t).min().unwrap();
+    let latest = user_audio
         .iter()
-        .map(|(_, _, first_tick)| *first_tick)
-        .min()
-        .unwrap();
-    
-    let latest_last_tick = user_audio
-        .iter()
-        .map(|(_, frames, _)| {
-            frames.keys().next_back().copied().unwrap_or(0)
-        })
+        .map(|(_, f, _)| f.keys().next_back().copied().unwrap_or(0))
         .max()
         .unwrap();
 
-    if latest_last_tick < earliest_first_tick {
+    if latest < earliest {
         return Err("Invalid tick range".into());
     }
 
     info!(
         "Merging {} users from tick {} to {}",
         user_audio.len(),
-        earliest_first_tick,
-        latest_last_tick
+        earliest,
+        latest
     );
 
     let spec = WavSpec {
@@ -166,28 +139,19 @@ fn merge_wavs(
     let mut writer = WavWriter::create(output_path, spec)?;
     let silence = vec![0i16; SAMPLES_PER_FRAME];
 
-    // For each tick, mix all users' audio
-    for tick in earliest_first_tick..=latest_last_tick {
-        let mut mixed_samples = vec![0i32; SAMPLES_PER_FRAME];
-
-        // Sum all users' samples at this tick
-        for (ssrc, frames, first_tick) in user_audio {
-            // Only include this user's audio if this tick is >= their first tick
+    for tick in earliest..=latest {
+        let mut mixed = vec![0i32; SAMPLES_PER_FRAME];
+        for (_, frames, first_tick) in user_audio {
             if tick >= *first_tick {
-                if let Some(samples) = frames.get(&tick) {
-                    for (i, &sample) in samples.iter().enumerate() {
-                        if i < mixed_samples.len() {
-                            mixed_samples[i] += sample as i32;
-                        }
+                for (i, &s) in frames.get(&tick).unwrap_or(&silence).iter().enumerate() {
+                    if i < mixed.len() {
+                        mixed[i] += s as i32;
                     }
                 }
             }
         }
-
-        // Convert mixed samples to i16 with clipping
-        for mixed in mixed_samples {
-            let clipped = mixed.clamp(i16::MIN as i32, i16::MAX as i32) as i16;
-            writer.write_sample(clipped)?;
+        for s in mixed {
+            writer.write_sample(s.clamp(i16::MIN as i32, i16::MAX as i32) as i16)?;
         }
     }
 
@@ -228,7 +192,7 @@ pub async fn reconstruct_audio(
 
     let mut processed = 0;
     let mut errors = Vec::new();
-    let mut user_audio_data: Vec<(String, BTreeMap<u64, Vec<i16>>, u64)> = Vec::new();
+    let mut user_audio_data: Vec<UserAudio> = Vec::new();
 
     for user_dir in &user_dirs {
         let ssrc = user_dir
@@ -237,18 +201,11 @@ pub async fn reconstruct_audio(
             .unwrap_or("unknown")
             .to_string();
 
-        info!("Processing user {} (SSRC: {})", ssrc, ssrc);
-
-        match load_user_audio(user_dir) {
-            Ok(frames) => {
-                if frames.is_empty() {
-                    info!("No frames found for user {}", ssrc);
-                    continue;
-                }
-
+        match load_user_chunks(user_dir) {
+            Ok(frames) if !frames.is_empty() => {
                 let first_tick = *frames.keys().next().unwrap();
-                
                 let output_path = output_dir.join(format!("{}.wav", ssrc));
+
                 match write_wav(&frames, &output_path) {
                     Ok(_) => {
                         let duration_secs =
@@ -261,37 +218,30 @@ pub async fn reconstruct_audio(
                             first_tick
                         );
                         processed += 1;
-                        
-                        user_audio_data.push((ssrc.clone(), frames, first_tick));
+                        user_audio_data.push((ssrc, frames, first_tick));
                     }
-                    Err(e) => {
-                        errors.push(format!("Failed to write WAV for {}: {}", ssrc, e));
-                    }
+                    Err(e) => errors.push(format!("Failed to write WAV for {}: {}", ssrc, e)),
                 }
             }
-            Err(e) => {
-                errors.push(format!("Failed to load audio for {}: {}", ssrc, e));
-            }
+            Ok(_) => info!("No frames found for SSRC {}", ssrc),
+            Err(e) => errors.push(format!("Failed to load audio for {}: {}", ssrc, e)),
         }
     }
 
     if !user_audio_data.is_empty() {
         let merged_path = output_dir.join("merged.wav");
-        match merge_wavs(&user_audio_data, &merged_path) {
-            Ok(_) => {
-                info!("Created merged WAV: {:?}", merged_path);
-            }
-            Err(e) => {
-                errors.push(format!("Failed to merge WAVs: {}", e));
-            }
+        if let Err(e) = merge_wavs(&user_audio_data, &merged_path) {
+            errors.push(format!("Failed to merge WAVs: {}", e));
+        } else {
+            info!("Created merged WAV: {:?}", merged_path);
         }
     }
 
     let mut response = format!(
-        "Reconstructed audio for {} user(s)\nOutput: `{:?}`",
-        processed, output_dir
+        "Reconstructed audio for {} user(s)\nOutput: `{}`",
+        processed,
+        output_dir.display()
     );
-
     if !errors.is_empty() {
         response.push_str(&format!("\nErrors:\n{}", errors.join("\n")));
     }

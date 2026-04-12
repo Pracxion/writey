@@ -1,66 +1,24 @@
 use crate::Context;
 use crate::Error;
 use crate::RecordingSession;
-use crate::voice::{Receiver, StorageWriter};
-use poise::serenity_prelude as serenity;
-use serenity::model::channel::{Channel, ChannelType};
-use serenity::model::id::{ChannelId, GuildId, UserId};
+use crate::voice::{Receiver, StorageWriter, resolve_voice_channel};
+use poise::serenity_prelude::model::channel::Channel;
 use songbird::CoreEvent;
 use std::sync::Arc;
 use tracing::{error, info};
 
-async fn get_voice_channel(
-    ctx: Context<'_>,
-    guild_id: GuildId,
-    user_id: UserId,
-    channel: Option<Channel>,
-) -> Result<Option<ChannelId>, Error> {
-    match channel {
-        Some(ch) => match ch {
-            Channel::Guild(ch) => {
-                if ch.kind == ChannelType::Voice {
-                    Ok(Some(ch.id))
-                } else {
-                    ctx.say("The specified channel is not a voice channel!")
-                        .await?;
-                    Ok(None)
-                }
-            }
-            _ => {
-                ctx.say("Invalid channel type!").await?;
-                Ok(None)
-            }
-        },
-        None => {
-            let cache = &ctx.serenity_context().cache;
-            let channel_id = cache.guild(guild_id).and_then(|guild| {
-                guild
-                    .voice_states
-                    .get(&user_id)
-                    .and_then(|vs| vs.channel_id)
-            });
-            match channel_id {
-                Some(id) => Ok(Some(id)),
-                None => {
-                    ctx.say("You're not in a voice channel. Please join one or specify a channel: `/start-recording channel:#your-voice-channel`").await?;
-                    Ok(None)
-                }
-            }
-        }
-    }
-}
-
 #[poise::command(prefix_command, slash_command, rename = "start-recording", guild_only)]
 pub async fn start_recording(
     ctx: Context<'_>,
-    #[description = "Voice channel to record (leave empty to auto-detect)"] channel: Option<Channel>,
+    #[description = "Voice channel to record (leave empty to auto-detect)"] channel: Option<
+        Channel,
+    >,
 ) -> Result<(), Error> {
     let guild_id = ctx
         .guild_id()
         .ok_or("This command must be used in a guild")?;
     let guild_id_u64 = guild_id.get();
     let user_id = ctx.author().id;
-    let user_id_u64 = user_id.get();
 
     {
         let sessions = ctx.data().active_sessions.lock().await;
@@ -71,7 +29,7 @@ pub async fn start_recording(
         }
     }
 
-    let voice_channel_id = match get_voice_channel(ctx, guild_id, user_id, channel).await? {
+    let voice_channel_id = match resolve_voice_channel(ctx, guild_id, user_id, channel).await? {
         Some(id) => id,
         None => return Ok(()),
     };
