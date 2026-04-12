@@ -10,11 +10,10 @@ pacman -Sy --noconfirm \
     ca-certificates \
     curl
 
-echo "Setting OPUS_STATIC=0 in .env..."
-if grep -q "OPUS_STATIC" .env 2>/dev/null; then
-    sed -i 's/^OPUS_STATIC=.*/OPUS_STATIC=0/' .env
-elif [ -f .env ]; then
-    echo "OPUS_STATIC=0" >> .env
+echo "Setting up .env..."
+if [ ! -f .env ]; then
+    cp .env.example .env
+    echo "Created .env from .env.example — fill in DISCORD_TOKEN and GUILD_ID"
 fi
 
 echo "Installing Rust toolchain..."
@@ -30,4 +29,3 @@ echo "Setup complete. Run the bot with:"
 echo "  source \$HOME/.cargo/env && cargo run"
 echo "  or: just dev"
 echo ""
-echo "Note: uses system Opus library (OPUS_STATIC=0)"
