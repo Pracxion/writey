@@ -94,6 +94,7 @@ async fn main() -> anyhow::Result<()> {
             start_recording(),
             stop_recording(),
             reconstruct_audio(),
+            export_audio(),
         ],
         prefix_options: poise::PrefixFrameworkOptions {
             prefix: Some("/".into()),

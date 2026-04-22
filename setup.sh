@@ -8,7 +8,10 @@ pacman -Sy --noconfirm \
     openssl \
     base-devel \
     ca-certificates \
-    curl
+    curl \
+    mold \
+    clang \
+    flac
 
 echo "Setting up .env..."
 if [ ! -f .env ]; then
