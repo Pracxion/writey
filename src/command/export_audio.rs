@@ -55,17 +55,6 @@ pub async fn export_audio(
         flac_size as f64 / 1024.0 / 1024.0
     );
 
-    if flac_size as usize <= PART_SIZE {
-        ctx.say(format!(
-            "Done! `{}` ({:.1} MB) — no splitting needed.",
-            flac_path.display(),
-            flac_size as f64 / 1024.0 / 1024.0
-        ))
-        .await?;
-        return Ok(());
-    }
-
-    // Split into 300 MB parts
     let timestamp = session_path
         .file_name()
         .and_then(|n| n.to_str())
@@ -81,7 +70,6 @@ pub async fn export_audio(
         if n == 0 {
             break;
         }
-        part_num += 1;
         let part_path = output_dir.join(format!("{}-part-{}.flac", timestamp, part_num));
         File::create(&part_path)?.write_all(&buf[..n])?;
         info!(
@@ -94,13 +82,13 @@ pub async fn export_audio(
             part_path.file_name().unwrap().to_str().unwrap(),
             n as f64 / 1024.0 / 1024.0
         ));
+        part_num += 1;
     }
 
-    // Remove the unsplit flac now that parts exist
     fs::remove_file(&flac_path)?;
 
     ctx.say(format!(
-        "Done! Split into {} parts:\n{}\n\nReassemble with:\n```\ncat merged.flac.part* > merged.flac\n```",
+        "Done! {} part(s):\n{}",
         parts.len(),
         parts.join("\n")
     ))
