@@ -4838,7 +4838,6 @@ dependencies = [
  "poise",
  "serenity",
  "songbird",
- "tempfile",
  "tokio",
  "tracing",
  "tracing-subscriber",

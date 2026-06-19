@@ -1,11 +1,11 @@
 use anyhow::Context as _;
 use dotenvy::dotenv;
 use poise::serenity_prelude as serenity;
-use serenity::{
-    Client,
-    model::gateway::GatewayIntents,
+use serenity::{Client, model::gateway::GatewayIntents};
+use songbird::{
+    Config, SerenityInit,
+    driver::{DecodeConfig, DecodeMode},
 };
-use songbird::{Config, SerenityInit, driver::{DecodeMode, DecodeConfig}};
 use std::{collections::HashMap, path::PathBuf, sync::Arc, time::Duration};
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
@@ -70,7 +70,6 @@ async fn on_error(error: poise::FrameworkError<'_, Data, Error>) {
         }
     }
 }
-
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -153,7 +152,8 @@ async fn main() -> anyhow::Result<()> {
         .options(options)
         .build();
 
-    let songbird_config = Config::default().decode_mode(DecodeMode::Decode(DecodeConfig::default()));
+    let songbird_config =
+        Config::default().decode_mode(DecodeMode::Decode(DecodeConfig::default()));
 
     let mut client = Client::builder(token, intents)
         .framework(framework)

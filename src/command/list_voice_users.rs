@@ -37,18 +37,12 @@ pub async fn list_voice_users(
         let user_id_serenity = serenity::model::id::UserId::new(user_id);
 
         if let Some(user) = cache.user(user_id_serenity) {
-            let display_name = user
-                .global_name
-                .as_deref()
-                .unwrap_or(user.name.as_str());
+            let display_name = user.global_name.as_deref().unwrap_or(user.name.as_str());
 
             users_in_channel.push((user_id, display_name.to_string(), user.name.clone()));
         } else {
             if let Ok(user) = http.get_user(user_id_serenity).await {
-                let display_name = user
-                    .global_name
-                    .as_deref()
-                    .unwrap_or(user.name.as_str());
+                let display_name = user.global_name.as_deref().unwrap_or(user.name.as_str());
                 users_in_channel.push((user_id, display_name.to_string(), user.name.clone()));
             } else {
                 users_in_channel.push((
