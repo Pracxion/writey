@@ -13,12 +13,6 @@ pacman -Sy --noconfirm \
     clang \
     flac
 
-echo "Setting up .env..."
-if [ ! -f .env ]; then
-    cp .env.example .env
-    echo "Created .env from .env.example — fill in DISCORD_TOKEN and GUILD_ID"
-fi
-
 echo "Installing Rust toolchain..."
 if ! command -v cargo &>/dev/null; then
     curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path

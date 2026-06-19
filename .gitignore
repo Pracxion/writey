@@ -11,12 +11,5 @@ target
 
 .env
 
-settings/**
-!settings/.gitkeep
-
 recordings/**
 !recordings/.gitkeep
-
-# Whisper models (downloaded from HuggingFace)
-models/**
-!models/.gitkeep

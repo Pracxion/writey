@@ -4,7 +4,7 @@ version = "0.0.1"
 edition = "2024"
 
 [dependencies]
-tokio = { version = "1.37", features = ["macros", "rt-multi-thread"] }
+tokio = { version = "1.37", features = ["macros", "rt-multi-thread", "io-util", "fs"] }
 serenity = { version = "0.12", default-features = false, features = [
   "client",
   "gateway",
