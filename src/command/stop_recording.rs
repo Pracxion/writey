@@ -17,7 +17,13 @@ fn format_duration(duration: chrono::Duration) -> String {
     }
 }
 
-#[poise::command(prefix_command, slash_command, rename = "stop-recording", guild_only)]
+#[poise::command(
+    prefix_command,
+    slash_command,
+    rename = "stop-recording",
+    guild_only,
+    check = "crate::command::is_authorized"
+)]
 pub async fn stop_recording(ctx: Context<'_>) -> Result<(), Error> {
     let guild_id = ctx
         .guild_id()

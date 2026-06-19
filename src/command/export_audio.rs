@@ -76,7 +76,12 @@ fn split_flac_into_parts(
 }
 
 /// Convert the merged WAV for a session to FLAC and split into 300 MB parts if needed
-#[poise::command(prefix_command, slash_command, rename = "export-audio")]
+#[poise::command(
+    prefix_command,
+    slash_command,
+    rename = "export-audio",
+    check = "crate::command::is_authorized"
+)]
 pub async fn export_audio(
     ctx: Context<'_>,
     #[description = "Session directory path (e.g. recordings/715908438760357910/2026_01_03_18_49_53)"]

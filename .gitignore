@@ -13,3 +13,5 @@ target
 
 recordings/**
 !recordings/.gitkeep
+deployment.sh
+provision.sh

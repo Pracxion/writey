@@ -7,7 +7,13 @@ use songbird::CoreEvent;
 use std::sync::Arc;
 use tracing::{error, info};
 
-#[poise::command(prefix_command, slash_command, rename = "start-recording", guild_only)]
+#[poise::command(
+    prefix_command,
+    slash_command,
+    rename = "start-recording",
+    guild_only,
+    check = "crate::command::is_authorized"
+)]
 pub async fn start_recording(
     ctx: Context<'_>,
     #[description = "Voice channel to record (leave empty to auto-detect)"] channel: Option<
